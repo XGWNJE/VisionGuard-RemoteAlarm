@@ -1,0 +1,39 @@
+# ===== Windows 端 =====
+VisionGuard_Windows/bin/
+VisionGuard_Windows/obj/
+VisionGuard_Windows/.vs/
+VisionGuard_Windows/packages/
+VisionGuard_Windows/*.user
+VisionGuard_Windows/*.suo
+VisionGuard_Windows/*.pfx
+VisionGuard_Windows/dist/
+
+# ===== 服务器端 =====
+VisionGuard_Server/node_modules/
+VisionGuard_Server/dist/
+VisionGuard_Server/.env
+VisionGuard_Server/.env.local
+VisionGuard_Server/data/screenshots/
+
+# ===== Android 端 =====
+VisionGuard_Android/*.iml
+VisionGuard_Android/.gradle/
+VisionGuard_Android/.idea/
+VisionGuard_Android/local.properties
+VisionGuard_Android/build/
+VisionGuard_Android/app/build/
+VisionGuard_Android/captures/
+VisionGuard_Android/.externalNativeBuild/
+VisionGuard_Android/.cxx/
+
+# ===== 通用 =====
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.log
+*.tmp
+*.cache
+.claude/
+
+# ===== 设计文件（大文件，按需跟踪）=====
+# *.pen

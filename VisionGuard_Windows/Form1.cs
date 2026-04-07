@@ -61,8 +61,15 @@ namespace VisionGuard
         // ── 目标页 控件 ─────────────────────────────────────────────
         private CocoClassPickerControl _classPicker;
 
-        // ── 服务器页 控件（Phase 2 填充，当前仅占位）─────────────────
-        private Label _lblServerPlaceholder;
+        // ── 服务器页 控件（Phase 2）──────────────────────────────────
+        private TextBox  _txtServerUrl;
+        private TextBox  _txtApiKey;
+        private TextBox  _txtDeviceName;
+        private Label    _lblConnState;
+
+        // ── ServerPushService + 心跳定时器 ───────────────────────────
+        private ServerPushService _serverPushService;
+        private System.Windows.Forms.Timer _heartbeatTimer;
 
         // ── 状态栏 ──────────────────────────────────────────────────
         private ToolStripStatusLabel _tsStatus, _tsLastAlert, _tsInferMs;
@@ -96,6 +103,7 @@ namespace VisionGuard
             _alertService   = new AlertService();
             _monitorService = new MonitorService(_alertService);
             _log            = new LogManager(_lstLog);
+            _serverPushService = new ServerPushService();
 
             _alertService.AlertTriggered   += OnAlertTriggered;
             _alertService.AlarmStarted     += OnAlarmStarted;
@@ -271,6 +279,17 @@ namespace VisionGuard
                     ? $"窗口「{cfg.TargetWindowTitle}」"
                     : $"区域 {cfg.CaptureRegion}";
                 _log.Info($"监控已启动 | {src} | {cfg.TargetFps} FPS | 阈值 {cfg.ConfidenceThreshold:P0}");
+
+                // 启动心跳定时器（30秒）
+                if (_heartbeatTimer == null)
+                {
+                    _heartbeatTimer = new System.Windows.Forms.Timer { Interval = 30000 };
+                    _heartbeatTimer.Tick += (s, ev) =>
+                        _serverPushService.SendHeartbeat(
+                            isMonitoring: _monitorService.IsStarted,
+                            isAlarming:   _alertService.IsAlarming);
+                }
+                _heartbeatTimer.Start();
             }
             catch (Exception ex)
             {
@@ -288,6 +307,8 @@ namespace VisionGuard
             _keyHook?.Dispose();
             _keyHook = null;
             _monitorService.Stop();
+            _heartbeatTimer?.Stop();
+            _serverPushService.SendHeartbeat(isMonitoring: false, isAlarming: false);
             UpdateControlState(started: false);
             _log.Info("监控已停止。");
         }
@@ -329,6 +350,9 @@ namespace VisionGuard
 
             BeginInvoke(new Action(() =>
                 _tsLastAlert.Text = "最后报警：" + e.Timestamp.ToString("HH:mm:ss")));
+
+            // 推送到服务器（fire-and-forget，内部克隆 PNG bytes）
+            _serverPushService.PushAlert(e);
 
             e.Snapshot?.Dispose();
         }
@@ -474,6 +498,25 @@ namespace VisionGuard
             }
 
             UpdateRegionLabel();
+
+            // 服务器页：从设置恢复
+            _txtServerUrl.Text  = SettingsStore.GetString("ServerUrl",  string.Empty);
+            _txtApiKey.Text     = SettingsStore.GetString("ApiKey",     string.Empty);
+            _txtDeviceName.Text = SettingsStore.GetString("DeviceName", Environment.MachineName);
+
+            // 如果上次保存了服务器地址，则自动重连
+            string savedUrl = _txtServerUrl.Text.Trim();
+            if (!string.IsNullOrEmpty(savedUrl))
+            {
+                string deviceId = EnsureDeviceId();
+                WireServerPushEvents();
+                _serverPushService.Configure(
+                    savedUrl,
+                    _txtApiKey.Text.Trim(),
+                    deviceId,
+                    _txtDeviceName.Text.Trim());
+                _log.Info($"[Server] 自动连接 {savedUrl}…");
+            }
         }
 
         private void SaveSettings()
@@ -488,6 +531,11 @@ namespace VisionGuard
 
             SettingsStore.Set("WatchedClasses",
                 string.Join(",", _classPicker.SelectedClasses));
+
+            // 服务器设置
+            SettingsStore.Set("ServerUrl",  _txtServerUrl.Text.Trim());
+            SettingsStore.Set("ApiKey",     _txtApiKey.Text.Trim());
+            SettingsStore.Set("DeviceName", _txtDeviceName.Text.Trim());
 
             if (_targetWindow != null)
             {
@@ -506,6 +554,76 @@ namespace VisionGuard
             }
 
             SettingsStore.Save();
+        }
+
+        // ── 服务器设置辅助 ────────────────────────────────────────────
+
+        private void SaveServerSettings()
+        {
+            SettingsStore.Set("ServerUrl",  _txtServerUrl.Text.Trim());
+            SettingsStore.Set("ApiKey",     _txtApiKey.Text.Trim());
+            SettingsStore.Set("DeviceName", _txtDeviceName.Text.Trim());
+            SettingsStore.Save();
+        }
+
+        /// <summary>首次调用时自动生成 DeviceId 并持久化，用户不可见</summary>
+        private string EnsureDeviceId()
+        {
+            string id = SettingsStore.GetString("DeviceId", string.Empty);
+            if (string.IsNullOrEmpty(id))
+            {
+                id = Guid.NewGuid().ToString();
+                SettingsStore.Set("DeviceId", id);
+                SettingsStore.Save();
+            }
+            return id;
+        }
+
+        private void WireServerPushEvents()
+        {
+            _serverPushService.ConnectionStateChanged += (s, state) =>
+            {
+                BeginInvoke(new Action(() =>
+                {
+                    switch (state)
+                    {
+                        case "connected":
+                            _lblConnState.Text      = "● 已连接";
+                            _lblConnState.ForeColor = Color.LimeGreen;
+                            break;
+                        case "connecting":
+                            _lblConnState.Text      = "◌ 连接中…";
+                            _lblConnState.ForeColor = Color.Goldenrod;
+                            break;
+                        default:
+                            _lblConnState.Text      = "● 未连接";
+                            _lblConnState.ForeColor = Color.Gray;
+                            break;
+                    }
+                }));
+            };
+
+            _serverPushService.CommandReceived += (s, cmd) =>
+            {
+                BeginInvoke(new Action(() =>
+                {
+                    switch (cmd)
+                    {
+                        case "pause":
+                            _monitorService.Pause();
+                            _log.Info("[Server] 收到命令：暂停监控。");
+                            break;
+                        case "resume":
+                            _monitorService.Resume();
+                            _log.Info("[Server] 收到命令：恢复监控。");
+                            break;
+                        case "stop-alarm":
+                            _alertService.StopAlarm();
+                            _log.Info("[Server] 收到命令：停止报警。");
+                            break;
+                    }
+                }));
+            };
         }
 
         // ════════════════════════════════════════════════════════════
@@ -586,6 +704,9 @@ namespace VisionGuard
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
             SaveSettings();
+            _heartbeatTimer?.Stop();
+            _heartbeatTimer?.Dispose();
+            _serverPushService?.Dispose();
             _alertService?.StopAlarm();
             _keyHook?.Dispose();
             _keyHook = null;
@@ -864,26 +985,108 @@ namespace VisionGuard
         }
 
         // ════════════════════════════════════════════════════════════
-        // 页面4：服务器推送（Phase 2 填充）
+        // 页面4：服务器推送
         // ════════════════════════════════════════════════════════════
 
         private void BuildServerPage()
         {
-            int PadX = 12;
-            int y    = 12;
+            const int PadX = 12;
+            const int LblW = 90;
+            const int TbW  = 220;
+            const int RowH = 22;
+            int y = 12;
 
             _pageServer.Controls.Add(MakeTitle("服务器推送", PadX, ref y, Font.Height));
 
-            _lblServerPlaceholder = new Label
+            // ── 辅助：添加 Label + TextBox 行（不含整数验证）────────
+            TextBox MakeRow(string lbl, string defaultText)
             {
-                Text = "服务器推送功能将在 Phase 2 实现。\n\n届时此页面将包含：\n• 服务器地址\n• API 密钥\n• 设备名称\n• 连接状态指示",
-                Left = PadX, Top = y,
-                Width  = _pageServer.ClientSize.Width - PadX * 2,
-                Height = 200,
-                ForeColor = Color.Gray, AutoSize = false,
-                Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top
+                _pageServer.Controls.Add(new Label
+                {
+                    Text = lbl, Left = PadX, Top = y + 3,
+                    Width = LblW - 2, Height = Font.Height + 4,
+                    ForeColor = Color.LightGray, AutoSize = false
+                });
+                var tb = new TextBox
+                {
+                    Left = PadX + LblW, Top = y,
+                    Width = TbW, Height = RowH,
+                    Text = defaultText,
+                    BackColor = Color.FromArgb(50, 50, 50),
+                    ForeColor = Color.White,
+                    BorderStyle = BorderStyle.FixedSingle,
+                };
+                _pageServer.Controls.Add(tb);
+                y += RowH + 6;
+                return tb;
+            }
+
+            _txtServerUrl  = MakeRow("服务器地址：", "");
+            _txtApiKey     = MakeRow("API 密钥：",   "");
+            _txtDeviceName = MakeRow("设备名称：",   Environment.MachineName);
+
+            y += 4;
+
+            // 连接/断开 按钮
+            var btnConnect = new FlatRoundButton
+            {
+                Text = "连接服务器", Left = PadX, Top = y, Width = 120, Height = 28,
             };
-            _pageServer.Controls.Add(_lblServerPlaceholder);
+            var btnDisconnect = new FlatRoundButton
+            {
+                Text = "断开", Left = PadX + 128, Top = y, Width = 80, Height = 28,
+            };
+            _pageServer.Controls.Add(btnConnect);
+            _pageServer.Controls.Add(btnDisconnect);
+            y += 36;
+
+            // 连接状态指示
+            _lblConnState = new Label
+            {
+                Text = "● 未连接", Left = PadX, Top = y, AutoSize = true,
+                ForeColor = Color.Gray,
+            };
+            _pageServer.Controls.Add(_lblConnState);
+            y += 28;
+
+            // 提示文字
+            _pageServer.Controls.Add(new Label
+            {
+                Text = "提示：配置后点击「连接服务器」，Windows → Debian → Android 三端联通。\n" +
+                       "API 密钥须与服务器 .env 中 API_KEY 一致。\n" +
+                       "留空服务器地址 = 纯本地模式（不影响现有功能）。",
+                Left = PadX, Top = y,
+                Width = _pageServer.ClientSize.Width - PadX * 2,
+                Height = 72,
+                ForeColor = Color.DimGray,
+                AutoSize = false,
+            });
+
+            // 按钮事件
+            btnConnect.Click += (s, e) =>
+            {
+                SaveServerSettings();
+                string url  = _txtServerUrl.Text.Trim();
+                string key  = _txtApiKey.Text.Trim();
+                string name = _txtDeviceName.Text.Trim();
+                if (string.IsNullOrEmpty(url))
+                {
+                    _log.Warn("未填写服务器地址，已保存设置（纯本地模式）。");
+                    return;
+                }
+                string deviceId = EnsureDeviceId();
+                _serverPushService.Dispose();
+                _serverPushService = new ServerPushService();
+                WireServerPushEvents();
+                _serverPushService.Configure(url, key, deviceId, name);
+                _log.Info($"[Server] 正在连接 {url}…");
+            };
+
+            btnDisconnect.Click += (s, e) =>
+            {
+                _serverPushService.Disconnect();
+                _log.Info("[Server] 已断开连接。");
+            };
         }
 
         // ════════════════════════════════════════════════════════════

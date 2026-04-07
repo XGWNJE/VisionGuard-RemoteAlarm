@@ -31,6 +31,9 @@ namespace VisionGuard.Services
         /// <summary>"pause" / "resume" / "stop-alarm"</summary>
         public event EventHandler<string> CommandReceived;
 
+        /// <summary>set-config 命令：key=配置项名, value=新值（字符串形式）</summary>
+        public event EventHandler<KeyValuePair<string, string>> SetConfigReceived;
+
         // ── 配置 ─────────────────────────────────────────────────────
         private string _serverUrl;
         private string _apiKey;
@@ -170,7 +173,16 @@ namespace VisionGuard.Services
 
         public void Disconnect()
         {
-            _wsCts?.Cancel();
+            _configured = false;          // 阻止心跳等后续操作
+            _wsCts?.Cancel();             // 通知 WsLoop 退出
+            // 主动关闭 WS，立即中断 ReceiveAsync 阻塞
+            try
+            {
+                if (_ws != null && _ws.State == WebSocketState.Open)
+                    _ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "user disconnect",
+                        CancellationToken.None).Wait(1000);
+            }
+            catch { /* 忽略关闭时异常 */ }
             SetWsState(false, "disconnected");  // 立即更新 UI，不等后台线程
         }
 
@@ -293,9 +305,32 @@ namespace VisionGuard.Services
                     if (!string.IsNullOrEmpty(cmd))
                         CommandReceived?.Invoke(this, cmd);
                 }
+                else if (type == "set-config")
+                {
+                    string key = SimpleJson.GetString(d, "key");
+                    string val = SimpleJson.GetString(d, "value");
+                    if (!string.IsNullOrEmpty(key))
+                        SetConfigReceived?.Invoke(this, new KeyValuePair<string, string>(key, val));
+                }
                 // auth-result 已在连接阶段消费，此处忽略
             }
             catch { }
+        }
+
+        /// <summary>
+        /// 发送命令回执（command-ack）给服务器，服务器再转发给 Android 端。
+        /// </summary>
+        public void SendCommandAck(string command, bool success, string reason = "")
+        {
+            if (!_configured || !_wsConnected) return;
+            var msg = new Dictionary<string, object>
+            {
+                ["type"]    = "command-ack",
+                ["command"] = command,
+                ["success"] = success,
+                ["reason"]  = reason ?? "",
+            };
+            WsSendJson(msg);
         }
 
         // ── WS 辅助 ──────────────────────────────────────────────────

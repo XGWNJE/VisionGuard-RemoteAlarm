@@ -41,7 +41,8 @@ export type WsMessageType =
   | 'alert'
   | 'device-list'
   | 'command'
-  | 'command-ack';
+  | 'command-ack'
+  | 'set-config';
 
 /** 客户端 → 服务器：认证 */
 export interface WsAuthMessage {
@@ -100,13 +101,28 @@ export interface WsCommand {
   command: 'pause' | 'resume' | 'stop-alarm';
 }
 
+/** Android → 服务器：参数调整 */
+export interface WsSetConfig {
+  type: 'set-config';
+  targetDeviceId: string;
+  key: string;    // 'cooldown' | 'confidence' | 'targets'
+  value: string;
+}
+
 /** 服务器 → Windows：转发命令 (不含 targetDeviceId) */
 export interface WsCommandRelay {
   type: 'command';
   command: 'pause' | 'resume' | 'stop-alarm';
 }
 
-/** 服务器 → Android：命令确认 */
+/** 服务器 → Windows：转发参数调整 */
+export interface WsSetConfigRelay {
+  type: 'set-config';
+  key: string;
+  value: string;
+}
+
+/** 服务器 → Android：命令确认（服务器生成 或 Windows 主动回包） */
 export interface WsCommandAck {
   type: 'command-ack';
   targetDeviceId: string;

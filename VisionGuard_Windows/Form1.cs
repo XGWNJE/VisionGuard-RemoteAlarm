@@ -61,11 +61,15 @@ namespace VisionGuard
         // ── 目标页 控件 ─────────────────────────────────────────────
         private CocoClassPickerControl _classPicker;
 
-        // ── 服务器页 控件（Phase 2）──────────────────────────────────
-        private TextBox  _txtServerUrl;
-        private TextBox  _txtApiKey;
+        // ── 服务器页 控件 ────────────────────────────────────────────
         private TextBox  _txtDeviceName;
         private Label    _lblConnState;
+        private Label    _lblConnDetail;   // 第二行：详细状态说明
+        private FlatRoundButton _btnRetry; // 手动重试按钮
+
+        // ── 服务器硬编码常量 ──────────────────────────────────────────
+        private const string ServerUrl = "http://66.154.112.91:3000";
+        private const string ServerApiKey = "XG-VisionGuard-2024";
 
         // ── ServerPushService + 心跳定时器 ───────────────────────────
         private ServerPushService _serverPushService;
@@ -237,13 +241,32 @@ namespace VisionGuard
 
         // ── 开始监控 ─────────────────────────────────────────────────
 
-        private void BtnStart_Click(object sender, EventArgs e)
+        private void BtnStart_Click(object sender, EventArgs e) => StartMonitor(remote: false);
+
+        /// <summary>
+        /// 启动监控推理。remote=true 时失败通过 command-ack 返回，不弹 MessageBox。
+        /// </summary>
+        private void StartMonitor(bool remote)
         {
+            if (_monitorService.IsStarted)
+            {
+                if (remote) _serverPushService.SendCommandAck("resume", false, "监控已在运行");
+                return;
+            }
+
             if (!File.Exists(ModelPath))
             {
-                MessageBox.Show(
-                    $"找不到模型文件：\n{ModelPath}\n\n请参阅 Assets/ASSETS_README.md。",
-                    "模型缺失", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                if (remote)
+                {
+                    _serverPushService.SendCommandAck("resume", false, "模型文件不存在");
+                    _log.Warn("[Server] 收到 resume，但模型文件不存在。");
+                }
+                else
+                {
+                    MessageBox.Show(
+                        $"找不到模型文件：\n{ModelPath}\n\n请参阅 Assets/ASSETS_README.md。",
+                        "模型缺失", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
                 return;
             }
 
@@ -254,8 +277,16 @@ namespace VisionGuard
             {
                 if (cfg.CaptureRegion.Width < 32 || cfg.CaptureRegion.Height < 32)
                 {
-                    MessageBox.Show("捕获区域太小（最小 32×32），请重新选择。",
-                        "区域无效", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    if (remote)
+                    {
+                        _serverPushService.SendCommandAck("resume", false, "未选择捕获区域，请先在捕获页框选区域");
+                        _log.Warn("[Server] 收到 resume，但捕获区域未设置。");
+                    }
+                    else
+                    {
+                        MessageBox.Show("捕获区域太小（最小 32×32），请重新选择。",
+                            "区域无效", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    }
                     return;
                 }
             }
@@ -263,8 +294,16 @@ namespace VisionGuard
             {
                 if (cfg.TargetWindowHandle == IntPtr.Zero)
                 {
-                    MessageBox.Show("请先点击「选择窗口…」选择目标窗口。",
-                        "未选择目标窗口", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    if (remote)
+                    {
+                        _serverPushService.SendCommandAck("resume", false, "目标窗口句柄无效，请重新选择");
+                        _log.Warn("[Server] 收到 resume，但目标窗口句柄无效。");
+                    }
+                    else
+                    {
+                        MessageBox.Show("请先点击「选择窗口…」选择目标窗口。",
+                            "未选择目标窗口", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    }
                     return;
                 }
             }
@@ -279,6 +318,11 @@ namespace VisionGuard
                     ? $"窗口「{cfg.TargetWindowTitle}」"
                     : $"区域 {cfg.CaptureRegion}";
                 _log.Info($"监控已启动 | {src} | {cfg.TargetFps} FPS | 阈值 {cfg.ConfidenceThreshold:P0}");
+                if (remote)
+                {
+                    _serverPushService.SendCommandAck("resume", true);
+                    _log.Info("[Server] 收到 resume，监控推理已启动。");
+                }
 
                 // 启动心跳定时器（30秒）
                 if (_heartbeatTimer == null)
@@ -295,14 +339,28 @@ namespace VisionGuard
             {
                 string fullMsg = BuildExceptionMessage(ex);
                 _log.Error("启动失败：" + fullMsg);
-                MessageBox.Show(fullMsg, "启动失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                if (remote)
+                    _serverPushService.SendCommandAck("resume", false, "启动异常: " + ex.Message);
+                else
+                    MessageBox.Show(fullMsg, "启动失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
         // ── 停止监控 ─────────────────────────────────────────────────
 
-        private void BtnStop_Click(object sender, EventArgs e)
+        private void BtnStop_Click(object sender, EventArgs e) => StopMonitor(remote: false);
+
+        /// <summary>
+        /// 停止监控推理。remote=true 时通过 command-ack 返回结果。
+        /// </summary>
+        private void StopMonitor(bool remote)
         {
+            if (!_monitorService.IsStarted)
+            {
+                if (remote) _serverPushService.SendCommandAck("pause", false, "监控未运行");
+                return;
+            }
+
             _alertService.StopAlarm();
             _keyHook?.Dispose();
             _keyHook = null;
@@ -310,7 +368,8 @@ namespace VisionGuard
             _heartbeatTimer?.Stop();
             _serverPushService.SendHeartbeat(isMonitoring: false, isAlarming: false);
             UpdateControlState(started: false);
-            _log.Info("监控已停止。");
+            _log.Info(remote ? "[Server] 收到 pause，监控推理已停止。" : "监控已停止。");
+            if (remote) _serverPushService.SendCommandAck("pause", true);
         }
 
         private void OnGlobalKeyDown(Keys key)
@@ -499,23 +558,19 @@ namespace VisionGuard
 
             UpdateRegionLabel();
 
-            // 服务器页：从设置恢复
-            _txtServerUrl.Text  = SettingsStore.GetString("ServerUrl",  string.Empty);
-            _txtApiKey.Text     = SettingsStore.GetString("ApiKey",     string.Empty);
+            // 服务器页：恢复设备名
             _txtDeviceName.Text = SettingsStore.GetString("DeviceName", Environment.MachineName);
 
-            // 如果上次保存了服务器地址，则自动重连
-            string savedUrl = _txtServerUrl.Text.Trim();
-            if (!string.IsNullOrEmpty(savedUrl))
+            // 启动时自动连接（服务器地址/Key 已硬编码）
             {
                 string deviceId = EnsureDeviceId();
                 WireServerPushEvents();
                 _serverPushService.Configure(
-                    savedUrl,
-                    _txtApiKey.Text.Trim(),
+                    ServerUrl,
+                    ServerApiKey,
                     deviceId,
                     _txtDeviceName.Text.Trim());
-                _log.Info($"[Server] 自动连接 {savedUrl}…");
+                _log.Info("[Server] 自动连接中…");
             }
         }
 
@@ -532,9 +587,7 @@ namespace VisionGuard
             SettingsStore.Set("WatchedClasses",
                 string.Join(",", _classPicker.SelectedClasses));
 
-            // 服务器设置
-            SettingsStore.Set("ServerUrl",  _txtServerUrl.Text.Trim());
-            SettingsStore.Set("ApiKey",     _txtApiKey.Text.Trim());
+            // 服务器设置：只保存设备名
             SettingsStore.Set("DeviceName", _txtDeviceName.Text.Trim());
 
             if (_targetWindow != null)
@@ -557,14 +610,6 @@ namespace VisionGuard
         }
 
         // ── 服务器设置辅助 ────────────────────────────────────────────
-
-        private void SaveServerSettings()
-        {
-            SettingsStore.Set("ServerUrl",  _txtServerUrl.Text.Trim());
-            SettingsStore.Set("ApiKey",     _txtApiKey.Text.Trim());
-            SettingsStore.Set("DeviceName", _txtDeviceName.Text.Trim());
-            SettingsStore.Save();
-        }
 
         /// <summary>首次调用时自动生成 DeviceId 并持久化，用户不可见</summary>
         private string EnsureDeviceId()
@@ -590,14 +635,29 @@ namespace VisionGuard
                         case "connected":
                             _lblConnState.Text      = "● 已连接";
                             _lblConnState.ForeColor = Color.LimeGreen;
+                            _lblConnDetail.Text     = "WebSocket 已就绪，报警推送正常";
+                            _lblConnDetail.ForeColor = Color.FromArgb(150, 255, 150);
+                            _btnRetry.Enabled = true;
+                            // 连接服务器成功 → 强制关闭本地铃声（由远程统一管控）
+                            if (_alertService.IsAlarming)
+                            {
+                                _alertService.StopAlarm();
+                                _log.Info("[Server] 已连接服务器，本地铃声已自动关闭。");
+                            }
                             break;
                         case "connecting":
                             _lblConnState.Text      = "◌ 连接中…";
                             _lblConnState.ForeColor = Color.Goldenrod;
+                            _lblConnDetail.Text     = "正在连接服务器，请稍候…";
+                            _lblConnDetail.ForeColor = Color.Goldenrod;
+                            _btnRetry.Enabled = false;
                             break;
-                        default:
+                        default:  // disconnected
                             _lblConnState.Text      = "● 未连接";
                             _lblConnState.ForeColor = Color.Gray;
+                            _lblConnDetail.Text     = "连接断开，将自动重连  ·  点击「手动重试」立即重连";
+                            _lblConnDetail.ForeColor = Color.DimGray;
+                            _btnRetry.Enabled = true;
                             break;
                     }
                 }));
@@ -610,20 +670,105 @@ namespace VisionGuard
                     switch (cmd)
                     {
                         case "pause":
-                            _monitorService.Pause();
-                            _log.Info("[Server] 收到命令：暂停监控。");
+                            StopMonitor(remote: true);
                             break;
+
                         case "resume":
-                            _monitorService.Resume();
-                            _log.Info("[Server] 收到命令：恢复监控。");
+                            StartMonitor(remote: true);
                             break;
+
                         case "stop-alarm":
-                            _alertService.StopAlarm();
-                            _log.Info("[Server] 收到命令：停止报警。");
+                            if (!_alertService.IsAlarming)
+                            {
+                                _serverPushService.SendCommandAck(cmd, false, "当前无报警");
+                            }
+                            else
+                            {
+                                _alertService.StopAlarm();
+                                _serverPushService.SendCommandAck(cmd, true);
+                                _log.Info("[Server] 收到命令：停止报警。");
+                            }
                             break;
                     }
                 }));
             };
+
+            _serverPushService.SetConfigReceived += (s, kv) =>
+            {
+                BeginInvoke(new Action(() => ApplyRemoteConfig(kv.Key, kv.Value)));
+            };
+        }
+
+
+        /// <summary>
+        /// 应用 Android 端下发的参数调整命令（set-config）。
+        /// 支持的 key：cooldown / confidence / targets
+        /// </summary>
+        private void ApplyRemoteConfig(string key, string value)
+        {
+            switch (key)
+            {
+                case "cooldown":
+                    if (int.TryParse(value, out int cd) && cd >= 1 && cd <= 300)
+                    {
+                        _txtCooldown.Text = cd.ToString();
+                        // 如果正在监控，实时更新 MonitorService 的配置
+                        if (_monitorService.IsStarted)
+                            _monitorService.UpdateConfig(BuildConfig());
+                        _serverPushService.SendCommandAck("set-config:cooldown", true);
+                        _log.Info($"[Server] 远程调整冷却时间 → {cd}s");
+                        SaveSettings();
+                    }
+                    else
+                    {
+                        _serverPushService.SendCommandAck("set-config:cooldown", false, "值无效（1-300）");
+                    }
+                    break;
+
+                case "confidence":
+                    if (float.TryParse(value,
+                        System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        out float conf) && conf >= 0.1f && conf <= 0.99f)
+                    {
+                        int pct = (int)(conf * 100);
+                        _trkThreshold.Value = Math.Max(_trkThreshold.Minimum,
+                                              Math.Min(_trkThreshold.Maximum, pct));
+                        if (_monitorService.IsStarted)
+                            _monitorService.UpdateConfig(BuildConfig());
+                        _serverPushService.SendCommandAck("set-config:confidence", true);
+                        _log.Info($"[Server] 远程调整置信度 → {pct}%");
+                        SaveSettings();
+                    }
+                    else
+                    {
+                        _serverPushService.SendCommandAck("set-config:confidence", false, "值无效（0.1-0.99）");
+                    }
+                    break;
+
+                case "targets":
+                    // value 为逗号分隔的类名，空字符串 = 全部
+                    var classes = new System.Collections.Generic.HashSet<string>(
+                        StringComparer.OrdinalIgnoreCase);
+                    if (!string.IsNullOrWhiteSpace(value))
+                        foreach (var cls in value.Split(','))
+                        {
+                            string trimmed = cls.Trim();
+                            if (!string.IsNullOrEmpty(trimmed))
+                                classes.Add(trimmed);
+                        }
+                    _classPicker.SetSelection(classes);
+                    if (_monitorService.IsStarted)
+                        _monitorService.UpdateConfig(BuildConfig());
+                    _serverPushService.SendCommandAck("set-config:targets", true);
+                    _log.Info($"[Server] 远程调整监控目标 → {(classes.Count == 0 ? "全部" : string.Join(",", classes))}");
+                    SaveSettings();
+                    break;
+
+                default:
+                    _serverPushService.SendCommandAck($"set-config:{key}", false, $"未知配置项: {key}");
+                    break;
+            }
         }
 
         // ════════════════════════════════════════════════════════════
@@ -996,96 +1141,145 @@ namespace VisionGuard
             const int RowH = 22;
             int y = 12;
 
-            _pageServer.Controls.Add(MakeTitle("服务器推送", PadX, ref y, Font.Height));
+            _pageServer.Controls.Add(MakeTitle("服务器连接", PadX, ref y, Font.Height));
 
-            // ── 辅助：添加 Label + TextBox 行（不含整数验证）────────
-            TextBox MakeRow(string lbl, string defaultText)
-            {
-                _pageServer.Controls.Add(new Label
-                {
-                    Text = lbl, Left = PadX, Top = y + 3,
-                    Width = LblW - 2, Height = Font.Height + 4,
-                    ForeColor = Color.LightGray, AutoSize = false
-                });
-                var tb = new TextBox
-                {
-                    Left = PadX + LblW, Top = y,
-                    Width = TbW, Height = RowH,
-                    Text = defaultText,
-                    BackColor = Color.FromArgb(50, 50, 50),
-                    ForeColor = Color.White,
-                    BorderStyle = BorderStyle.FixedSingle,
-                };
-                _pageServer.Controls.Add(tb);
-                y += RowH + 6;
-                return tb;
-            }
-
-            _txtServerUrl  = MakeRow("服务器地址：", "");
-            _txtApiKey     = MakeRow("API 密钥：",   "");
-            _txtDeviceName = MakeRow("设备名称：",   Environment.MachineName);
-
-            y += 4;
-
-            // 连接/断开 按钮
-            var btnConnect = new FlatRoundButton
-            {
-                Text = "连接服务器", Left = PadX, Top = y, Width = 120, Height = 28,
-            };
-            var btnDisconnect = new FlatRoundButton
-            {
-                Text = "断开", Left = PadX + 128, Top = y, Width = 80, Height = 28,
-            };
-            _pageServer.Controls.Add(btnConnect);
-            _pageServer.Controls.Add(btnDisconnect);
-            y += 36;
-
-            // 连接状态指示
+            // ── 连接状态（主标签）───────────────────────────────────
             _lblConnState = new Label
             {
                 Text = "● 未连接", Left = PadX, Top = y, AutoSize = true,
                 ForeColor = Color.Gray,
+                Font = new Font(Font, FontStyle.Bold),
             };
             _pageServer.Controls.Add(_lblConnState);
-            y += 28;
+            y += 24;
 
-            // 提示文字
-            _pageServer.Controls.Add(new Label
+            // ── 详细状态说明（次标签）───────────────────────────────
+            _lblConnDetail = new Label
             {
-                Text = "提示：配置后点击「连接服务器」，Windows → Debian → Android 三端联通。\n" +
-                       "API 密钥须与服务器 .env 中 API_KEY 一致。\n" +
-                       "留空服务器地址 = 纯本地模式（不影响现有功能）。",
+                Text = "启动后自动连接，请稍候…",
                 Left = PadX, Top = y,
                 Width = _pageServer.ClientSize.Width - PadX * 2,
-                Height = 72,
+                Height = Font.Height + 4,
+                ForeColor = Color.DimGray,
+                AutoSize = false,
+            };
+            _pageServer.Controls.Add(_lblConnDetail);
+            y += 26;
+
+            // ── 服务器信息（只读展示）───────────────────────────────
+            _pageServer.Controls.Add(new Label
+            {
+                Text = "服务器：••••••••（已内置）",
+                Left = PadX, Top = y, AutoSize = true,
+                ForeColor = Color.FromArgb(120, 120, 120),
+            });
+            y += 20;
+
+            _pageServer.Controls.Add(new Label
+            {
+                Text = "API Key：••••••••（已内置）",
+                Left = PadX, Top = y, AutoSize = true,
+                ForeColor = Color.FromArgb(120, 120, 120),
+            });
+            y += 28;
+
+            // ── 手动重试 按钮 ────────────────────────────────────────
+            _btnRetry = new FlatRoundButton
+            {
+                Text = "手动重试连接", Left = PadX, Top = y, Width = 120, Height = 28,
+            };
+            _pageServer.Controls.Add(_btnRetry);
+            y += 36;
+
+            // ── 分割线（用 Label 模拟）───────────────────────────────
+            _pageServer.Controls.Add(new Label
+            {
+                Text = "", Left = PadX, Top = y,
+                Width = _pageServer.ClientSize.Width - PadX * 2,
+                Height = 1,
+                BorderStyle = BorderStyle.FixedSingle,
+                ForeColor = Color.FromArgb(60, 60, 60),
+                BackColor = Color.FromArgb(60, 60, 60),
+            });
+            y += 12;
+
+            // ── 设备名称（唯一可编辑项）─────────────────────────────
+            _pageServer.Controls.Add(new Label
+            {
+                Text = "设备名称：", Left = PadX, Top = y + 3,
+                Width = LblW - 2, Height = Font.Height + 4,
+                ForeColor = Color.LightGray, AutoSize = false
+            });
+            _txtDeviceName = new TextBox
+            {
+                Left = PadX + LblW, Top = y,
+                Width = TbW, Height = RowH,
+                Text = Environment.MachineName,
+                BackColor = Color.FromArgb(50, 50, 50),
+                ForeColor = Color.White,
+                BorderStyle = BorderStyle.FixedSingle,
+            };
+            _pageServer.Controls.Add(_txtDeviceName);
+            y += RowH + 6;
+
+            _pageServer.Controls.Add(new Label
+            {
+                Text = "设备名在 Android 端设备列表中显示，修改后重新连接生效。",
+                Left = PadX, Top = y,
+                Width = _pageServer.ClientSize.Width - PadX * 2,
+                Height = Font.Height + 4,
                 ForeColor = Color.DimGray,
                 AutoSize = false,
             });
+            y += 24;
 
-            // 按钮事件
-            btnConnect.Click += (s, e) =>
+            // ── 应用设备名 按钮 ──────────────────────────────────────
+            var btnApplyName = new FlatRoundButton
             {
-                SaveServerSettings();
-                string url  = _txtServerUrl.Text.Trim();
-                string key  = _txtApiKey.Text.Trim();
+                Text = "应用设备名", Left = PadX, Top = y, Width = 100, Height = 26,
+            };
+            _pageServer.Controls.Add(btnApplyName);
+            y += 36;
+
+            // ── 故障排查说明 ─────────────────────────────────────────
+            _pageServer.Controls.Add(new Label
+            {
+                Text = "排查建议：\r\n" +
+                       "• 未连接 → 检查网络，或点「手动重试」\r\n" +
+                       "• 长时间连接中 → 确认服务器网络可访问\r\n" +
+                       "• 认证失败 → API Key 已更新，需重新打包程序",
+                Left = PadX, Top = y,
+                Width = _pageServer.ClientSize.Width - PadX * 2,
+                Height = 76,
+                ForeColor = Color.FromArgb(100, 100, 100),
+                AutoSize = false,
+            });
+
+            // ── 按钮事件 ────────────────────────────────────────────
+            _btnRetry.Click += (s, e) =>
+            {
                 string name = _txtDeviceName.Text.Trim();
-                if (string.IsNullOrEmpty(url))
-                {
-                    _log.Warn("未填写服务器地址，已保存设置（纯本地模式）。");
-                    return;
-                }
                 string deviceId = EnsureDeviceId();
                 _serverPushService.Dispose();
                 _serverPushService = new ServerPushService();
                 WireServerPushEvents();
-                _serverPushService.Configure(url, key, deviceId, name);
-                _log.Info($"[Server] 正在连接 {url}…");
+                _serverPushService.Configure(ServerUrl, ServerApiKey, deviceId, name);
+                _log.Info("[Server] 手动重试连接…");
             };
 
-            btnDisconnect.Click += (s, e) =>
+            btnApplyName.Click += (s, e) =>
             {
-                _serverPushService.Disconnect();
-                _log.Info("[Server] 已断开连接。");
+                string name = _txtDeviceName.Text.Trim();
+                if (string.IsNullOrEmpty(name)) { _log.Warn("设备名不能为空。"); return; }
+                SettingsStore.Set("DeviceName", name);
+                SettingsStore.Save();
+                // 重新连接以更新设备名
+                string deviceId = EnsureDeviceId();
+                _serverPushService.Dispose();
+                _serverPushService = new ServerPushService();
+                WireServerPushEvents();
+                _serverPushService.Configure(ServerUrl, ServerApiKey, deviceId, name);
+                _log.Info($"[Server] 设备名已更新为「{name}」，重新连接中…");
             };
         }
 

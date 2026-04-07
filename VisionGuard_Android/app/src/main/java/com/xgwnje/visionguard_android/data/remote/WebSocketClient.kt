@@ -1,0 +1,226 @@
+package com.xgwnje.visionguard_android.data.remote
+
+// ┌─────────────────────────────────────────────────────────┐
+// │ WebSocketClient.kt                                      │
+// │ 角色：OkHttp WebSocket 封装，自动重连（指数退避）          │
+// │ 线程：回调在 OkHttp 线程池；状态通过 StateFlow 暴露       │
+// │ 对外 API：connect(), disconnect(), sendCommand()         │
+// │           connectionState, onAlert, onDeviceList         │
+// └─────────────────────────────────────────────────────────┘
+
+import android.util.Log
+import com.google.gson.Gson
+import com.google.gson.JsonObject
+import com.google.gson.JsonParser
+import com.xgwnje.visionguard_android.data.model.AlertMessage
+import com.xgwnje.visionguard_android.data.model.DeviceInfo
+import com.xgwnje.visionguard_android.data.model.WsAuthMessage
+import com.xgwnje.visionguard_android.data.model.WsCommandMessage
+import com.xgwnje.visionguard_android.data.model.WsSetConfigMessage
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
+import okhttp3.WebSocket
+import okhttp3.WebSocketListener
+import java.util.concurrent.TimeUnit
+
+private const val TAG = "VG_WsClient"
+private val BACKOFF_SECONDS = longArrayOf(1, 2, 4, 8, 16, 30)
+
+enum class WsState {
+    DISCONNECTED,   // 未连接 / 连接断开
+    CONNECTING,     // TCP 握手 + 等待认证
+    CONNECTED,      // 认证成功，正常工作
+    AUTH_FAILED     // API Key 错误，不会自动重连
+}
+
+class WebSocketClient {
+
+    private val gson = Gson()
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    private val _connectionState = MutableStateFlow(WsState.DISCONNECTED)
+    val connectionState: StateFlow<WsState> = _connectionState
+
+    private val _onAlert = MutableSharedFlow<AlertMessage>(extraBufferCapacity = 64)
+    val onAlert: SharedFlow<AlertMessage> = _onAlert
+
+    private val _onDeviceList = MutableSharedFlow<List<DeviceInfo>>(extraBufferCapacity = 8)
+    val onDeviceList: SharedFlow<List<DeviceInfo>> = _onDeviceList
+
+    private val _onCommandAck = MutableSharedFlow<Pair<String, Boolean>>(extraBufferCapacity = 8)
+    val onCommandAck: SharedFlow<Pair<String, Boolean>> = _onCommandAck  // <command, success>
+
+    private var serverUrl: String = ""
+    private var apiKey: String = ""
+    private var deviceId: String = ""
+
+    private val http = OkHttpClient.Builder()
+        .pingInterval(25, TimeUnit.SECONDS)
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(0, TimeUnit.SECONDS)   // WebSocket 长连接无读超时
+        .build()
+
+    private var ws: WebSocket? = null
+    private var connectJob: Job? = null
+    private var shouldReconnect = false
+
+    // ── 公开 API ──────────────────────────────────────────────
+
+    fun connect(serverUrl: String, apiKey: String, deviceId: String) {
+        this.serverUrl = serverUrl.trimEnd('/')
+        this.apiKey    = apiKey
+        this.deviceId  = deviceId
+        shouldReconnect = true
+        // 重置认证失败状态，让 UI 显示 CONNECTING
+        if (_connectionState.value == WsState.AUTH_FAILED) {
+            _connectionState.value = WsState.DISCONNECTED
+        }
+        startConnectLoop()
+    }
+
+    fun disconnect() {
+        shouldReconnect = false
+        connectJob?.cancel()
+        ws?.close(1000, "user disconnect")
+        ws = null
+        _connectionState.value = WsState.DISCONNECTED
+    }
+
+    fun sendCommand(targetDeviceId: String, command: String) {
+        val msg = WsCommandMessage(targetDeviceId = targetDeviceId, command = command)
+        ws?.send(gson.toJson(msg))
+    }
+
+    fun sendSetConfig(targetDeviceId: String, key: String, value: String) {
+        val msg = WsSetConfigMessage(targetDeviceId = targetDeviceId, key = key, value = value)
+        ws?.send(gson.toJson(msg))
+    }
+
+    // ── 连接循环 ──────────────────────────────────────────────
+
+    private fun startConnectLoop() {
+        connectJob?.cancel()
+        connectJob = scope.launch {
+            var attempt = 0
+            while (shouldReconnect) {
+                _connectionState.value = WsState.CONNECTING
+                Log.i(TAG, "WS 连接中 → $serverUrl (第${attempt + 1}次)")
+
+                val wsUrl = serverUrl
+                    .replace("https://", "wss://")
+                    .replace("http://",  "ws://") + "/ws"
+
+                val req = Request.Builder().url(wsUrl).build()
+                var connectedSuccessfully = false
+
+                val listener = object : WebSocketListener() {
+                    override fun onOpen(ws: WebSocket, response: Response) {
+                        Log.i(TAG, "WS onOpen，发送认证")
+                        val auth = WsAuthMessage(apiKey = apiKey, deviceId = deviceId)
+                        ws.send(gson.toJson(auth))
+                    }
+
+                    override fun onMessage(ws: WebSocket, text: String) {
+                        handleMessage(text)
+                        if (!connectedSuccessfully) connectedSuccessfully = true
+                    }
+
+                    override fun onFailure(ws: WebSocket, t: Throwable, response: Response?) {
+                        Log.w(TAG, "WS 失败: ${t.message}")
+                        _connectionState.value = WsState.DISCONNECTED
+                    }
+
+                    override fun onClosed(ws: WebSocket, code: Int, reason: String) {
+                        Log.i(TAG, "WS 关闭: $code $reason")
+                        _connectionState.value = WsState.DISCONNECTED
+                    }
+                }
+
+                ws = http.newWebSocket(req, listener)
+
+                // 等待连接结果（最多 12 秒等认证）
+                val deadline = System.currentTimeMillis() + 12_000
+                while (System.currentTimeMillis() < deadline && shouldReconnect) {
+                    if (_connectionState.value == WsState.CONNECTED) break
+                    delay(200)
+                }
+
+                if (_connectionState.value != WsState.CONNECTED && shouldReconnect) {
+                    ws?.cancel()
+                    ws = null
+                    _connectionState.value = WsState.DISCONNECTED
+                    val waitSec = BACKOFF_SECONDS[minOf(attempt, BACKOFF_SECONDS.size - 1)]
+                    Log.i(TAG, "${waitSec}s 后重连...")
+                    delay(waitSec * 1000)
+                    attempt++
+                } else {
+                    // 已连接，等待它关闭（状态变为 DISCONNECTED）
+                    while (_connectionState.value == WsState.CONNECTED && shouldReconnect) {
+                        delay(500)
+                    }
+                    if (shouldReconnect) {
+                        val waitSec = BACKOFF_SECONDS[0]
+                        delay(waitSec * 1000)
+                        attempt = 0  // 曾经连接成功，退避归零
+                    }
+                }
+            }
+        }
+    }
+
+    // ── 消息处理 ──────────────────────────────────────────────
+
+    private fun handleMessage(text: String) {
+        try {
+            val obj: JsonObject = JsonParser.parseString(text).asJsonObject
+            when (val type = obj.get("type")?.asString ?: "") {
+                "auth-result" -> {
+                    val success = obj.get("success")?.asBoolean ?: false
+                    if (success) {
+                        Log.i(TAG, "WS 认证成功")
+                        _connectionState.value = WsState.CONNECTED
+                    } else {
+                        val reason = obj.get("reason")?.asString ?: "unknown"
+                        Log.w(TAG, "WS 认证失败: $reason")
+                        _connectionState.value = WsState.AUTH_FAILED
+                        shouldReconnect = false  // 认证失败，不再重连（需要用户重新配置）
+                    }
+                }
+                "alert" -> {
+                    val alert = gson.fromJson(text, AlertMessage::class.java)
+                    scope.launch { _onAlert.emit(alert) }
+                }
+                "device-list" -> {
+                    val devicesArr = obj.getAsJsonArray("devices")
+                    val devices = devicesArr?.map { gson.fromJson(it, DeviceInfo::class.java) } ?: emptyList()
+                    scope.launch { _onDeviceList.emit(devices) }
+                }
+                "command-ack" -> {
+                    val cmd     = obj.get("command")?.asString ?: ""
+                    val success = obj.get("success")?.asBoolean ?: false
+                    val reason  = obj.get("reason")?.asString ?: ""
+                    // 过滤服务器中转确认（reason="relayed"），只处理 Windows 真实执行结果
+                    if (reason != "relayed") {
+                        // 将 reason 附在 command 后面，DeviceListScreen 显示时可读取
+                        val display = if (!success && reason.isNotEmpty()) "$cmd（$reason）" else cmd
+                        scope.launch { _onCommandAck.emit(Pair(display, success)) }
+                    }
+                }
+                else -> Log.d(TAG, "未知消息 type=$type")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "消息解析失败: ${e.message}")
+        }
+    }
+}

@@ -9,9 +9,9 @@ import WebSocket from 'ws';
 import { config } from '../config';
 import { validateApiKey } from '../middleware/auth';
 import type {
-  WsAuthMessage, WsHeartbeat, WsCommand,
+  WsAuthMessage, WsHeartbeat, WsCommand, WsSetConfig,
   WindowsClient, AndroidClient, WsAlertPush,
-  DeviceStatus, WsCommandRelay, WsCommandAck,
+  DeviceStatus, WsCommandRelay, WsSetConfigRelay, WsCommandAck,
 } from '../models/types';
 
 const windowsClients = new Map<string, WindowsClient>();
@@ -57,6 +57,13 @@ export function handleConnection(ws: WebSocket): void {
         break;
       case 'command':
         if (role === 'android') handleCommand(ws, msg as WsCommand);
+        break;
+      case 'set-config':
+        if (role === 'android') handleSetConfig(ws, msg as WsSetConfig);
+        break;
+      case 'command-ack':
+        // Windows 端主动发回的 ack（含前置校验错误原因），转发给所有 Android
+        if (role === 'windows') handleWindowsCommandAck(msg as WsCommandAck, deviceId!);
         break;
     }
   });
@@ -171,12 +178,55 @@ function handleCommand(senderWs: WebSocket, msg: WsCommand): void {
     return;
   }
 
-  // 转发给目标 Windows (不含 targetDeviceId)
+  // 转发给目标 Windows（Windows 端会自行发回带 reason 的 command-ack）
   const relay: WsCommandRelay = { type: 'command', command: msg.command };
   target.ws.send(JSON.stringify(relay));
 
+  // 注意：这里只发"已转发"的临时 ack；
+  // Windows 端执行后会再发一个带 success/reason 的 command-ack，
+  // 由 handleWindowsCommandAck 转发给 Android。
   ack.success = true;
+  ack.reason = 'relayed';
   sendJson(senderWs, ack);
+}
+
+function handleSetConfig(senderWs: WebSocket, msg: WsSetConfig): void {
+  const target = windowsClients.get(msg.targetDeviceId);
+
+  const ack: WsCommandAck = {
+    type: 'command-ack',
+    targetDeviceId: msg.targetDeviceId,
+    command: `set-config:${msg.key}`,
+    success: false,
+    reason: '',
+  };
+
+  if (!target || target.ws.readyState !== WebSocket.OPEN) {
+    ack.reason = 'device offline';
+    sendJson(senderWs, ack);
+    return;
+  }
+
+  // 转发 set-config 给目标 Windows
+  const relay: WsSetConfigRelay = { type: 'set-config', key: msg.key, value: msg.value };
+  target.ws.send(JSON.stringify(relay));
+
+  // 同样只发"已转发"，Windows 端执行后回 command-ack
+  ack.success = true;
+  ack.reason = 'relayed';
+  sendJson(senderWs, ack);
+}
+
+/** Windows 端主动回传的 command-ack（含具体执行结果），广播给所有 Android */
+function handleWindowsCommandAck(ack: WsCommandAck, windowsDeviceId: string): void {
+  // 补充 targetDeviceId（Windows 自己就是 target，让 Android 知道是哪台设备的回执）
+  const enriched = { ...ack, targetDeviceId: windowsDeviceId };
+  const data = JSON.stringify(enriched);
+  for (const client of androidClients.values()) {
+    if (client.ws.readyState === WebSocket.OPEN) {
+      client.ws.send(data);
+    }
+  }
 }
 
 function broadcastDeviceList(): void {

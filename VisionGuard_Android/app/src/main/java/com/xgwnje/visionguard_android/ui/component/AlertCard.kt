@@ -5,7 +5,9 @@ package com.xgwnje.visionguard_android.ui.component
 // │ 角色：报警列表中的单条卡片，显示设备名/标签/缩略图/时间    │
 // └─────────────────────────────────────────────────────────┘
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -14,8 +16,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -23,13 +28,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
-import com.xgwnje.visionguard_android.AppConstants
 import com.xgwnje.visionguard_android.data.model.AlertMessage
+import com.xgwnje.visionguard_android.data.model.cocoLabelZh
 
 @Composable
 fun AlertCard(
@@ -47,19 +50,22 @@ fun AlertCard(
             modifier = Modifier.padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // 缩略图
-            if (alert.screenshotUrl.isNotEmpty()) {
-                val imgUrl = "${AppConstants.SERVER_URL}${alert.screenshotUrl}?key=${AppConstants.API_KEY}"
-                AsyncImage(
-                    model = imgUrl,
+            // 缩略图占位符（截图由详情页按需加载）
+            Box(
+                modifier = Modifier
+                    .size(64.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                contentAlignment = androidx.compose.ui.Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Image,
                     contentDescription = "截图",
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .size(64.dp)
-                        .clip(RoundedCornerShape(6.dp))
+                    modifier = Modifier.size(28.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Spacer(modifier = Modifier.width(12.dp))
             }
+            Spacer(modifier = Modifier.width(12.dp))
 
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -76,7 +82,7 @@ fun AlertCard(
                 }
                 // 检测标签摘要
                 val labelsText = alert.detections.take(3).joinToString("  ") {
-                    "${it.label} ${(it.confidence * 100).toInt()}%"
+                    "${cocoLabelZh(it.label)} ${(it.confidence * 100).toInt()}%"
                 }
                 Text(
                     text = labelsText.ifEmpty { "无检测结果" },

@@ -37,6 +37,18 @@ namespace VisionGuard.Services
 
         public bool IsStarted => _timer != null;
 
+        /// <summary>选区/窗口是否已设定（用于心跳同步给 Android 显示准备状态）</summary>
+        public bool IsReady
+        {
+            get
+            {
+                if (_config == null) return false;
+                if (_config.CaptureMode == CaptureMode.WindowHandle)
+                    return _config.TargetWindowHandle != IntPtr.Zero;
+                return _config.CaptureRegion.Width >= 32 && _config.CaptureRegion.Height >= 32;
+            }
+        }
+
         public MonitorService(AlertService alertService)
         {
             _alertService = alertService;

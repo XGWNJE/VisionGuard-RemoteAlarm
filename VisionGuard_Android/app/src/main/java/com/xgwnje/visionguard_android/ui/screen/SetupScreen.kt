@@ -9,7 +9,6 @@ package com.xgwnje.visionguard_android.ui.screen
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -34,7 +33,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.xgwnje.visionguard_android.AppConstants
 import com.xgwnje.visionguard_android.data.remote.WsState
 import com.xgwnje.visionguard_android.service.AlertForegroundService
 
@@ -64,9 +62,6 @@ fun SetupScreen(service: AlertForegroundService) {
             TroubleshootCard(wsState = wsState)
         }
 
-        // ── 服务器信息（只读展示） ────────────────────────────
-        InfoCard()
-
         // ── 手动重试按钮 ──────────────────────────────────────
         Button(
             onClick = { service.reconnect() },
@@ -85,7 +80,7 @@ fun SetupScreen(service: AlertForegroundService) {
                     color = MaterialTheme.colorScheme.onPrimary
                 )
             } else {
-                Text("手动重试连接", fontSize = 16.sp)
+                Text("重试", fontSize = 16.sp)
             }
         }
     }
@@ -192,50 +187,3 @@ private fun BulletItem(text: String) {
     }
 }
 
-// ── 服务器只读信息卡片 ────────────────────────────────────
-
-@Composable
-private fun InfoCard() {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
-        ),
-        border = androidx.compose.foundation.BorderStroke(
-            1.dp, MaterialTheme.colorScheme.outlineVariant
-        )
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            Text(
-                text = "连接信息",
-                fontWeight = FontWeight.SemiBold,
-                fontSize = 14.sp
-            )
-            HorizontalDivider()
-            InfoRow("服务器地址", "••••••••（已内置）")
-            InfoRow("API Key", "••••••••（已内置）")
-        }
-    }
-}
-
-@Composable
-private fun InfoRow(label: String, value: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Text(
-            text = label,
-            fontSize = 13.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Text(
-            text = value,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Medium
-        )
-    }
-}

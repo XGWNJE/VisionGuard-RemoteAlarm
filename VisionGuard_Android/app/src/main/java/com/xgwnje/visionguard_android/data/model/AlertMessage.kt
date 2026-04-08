@@ -25,5 +25,13 @@ data class AlertMessage(
     val deviceName: String,
     val timestamp: String,           // ISO 8601
     val detections: List<Detection>,
-    val screenshotUrl: String        // e.g. "/screenshots/<alertId>.png"
+    val screenshotUrl: String = "",  // 已废弃，保留兼容（Windows 不再发此字段）
+    val screenshotData: ScreenshotData? = null
+)
+
+data class ScreenshotData(
+    val alertId: String,
+    val imageBase64: String,
+    val width: Int,
+    val height: Int
 )

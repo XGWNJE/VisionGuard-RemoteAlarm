@@ -54,9 +54,6 @@ namespace VisionGuard
         private TextBox         _txtFps, _txtThreads, _txtCooldown;
         private DarkSlider      _trkThreshold;
         private Label           _lblThreshold;
-        private CheckBox        _chkPlaySound;
-        private TextBox         _txtSoundPath;
-        private FlatRoundButton _btnPickSound;
 
         // ── 目标页 控件 ─────────────────────────────────────────────
         private CocoClassPickerControl _classPicker;
@@ -78,9 +75,8 @@ namespace VisionGuard
         // ── 状态栏 ──────────────────────────────────────────────────
         private ToolStripStatusLabel _tsStatus, _tsLastAlert, _tsInferMs;
 
-        // ── 系统托盘 / 键钩 ──────────────────────────────────────────
-        private NotifyIcon    _notifyIcon;
-        private GlobalKeyHook _keyHook;
+        // ── 系统托盘 ──────────────────────────────────────────────
+        private NotifyIcon _notifyIcon;
 
         // ── 运行时目标窗口（不持久化 HWND）──────────────────────────
         private WindowInfo    _targetWindow;   // null = 屏幕区域模式
@@ -110,8 +106,6 @@ namespace VisionGuard
             _serverPushService = new ServerPushService();
 
             _alertService.AlertTriggered   += OnAlertTriggered;
-            _alertService.AlarmStarted     += OnAlarmStarted;
-            _alertService.AlarmStopped     += OnAlarmStopped;
             _monitorService.FrameProcessed += OnFrameProcessed;
 
             SetupTrayIcon();
@@ -311,8 +305,6 @@ namespace VisionGuard
             try
             {
                 _monitorService.Start(ModelPath, cfg);
-                _keyHook = new GlobalKeyHook();
-                _keyHook.KeyDown += OnGlobalKeyDown;
                 UpdateControlState(started: true);
                 string src = cfg.CaptureMode == CaptureMode.WindowHandle
                     ? $"窗口「{cfg.TargetWindowTitle}」"
@@ -324,14 +316,15 @@ namespace VisionGuard
                     _log.Info("[Server] 收到 resume，监控推理已启动。");
                 }
 
-                // 启动心跳定时器（30秒）
+                // 启动心跳定时器（5秒）
                 if (_heartbeatTimer == null)
                 {
-                    _heartbeatTimer = new System.Windows.Forms.Timer { Interval = 30000 };
+                    _heartbeatTimer = new System.Windows.Forms.Timer { Interval = 5000 };
                     _heartbeatTimer.Tick += (s, ev) =>
                         _serverPushService.SendHeartbeat(
                             isMonitoring: _monitorService.IsStarted,
-                            isAlarming:   _alertService.IsAlarming);
+                            isAlarming:   _alertService.IsAlarming,
+                            isReady:       _monitorService.IsReady);
                 }
                 _heartbeatTimer.Start();
             }
@@ -361,24 +354,12 @@ namespace VisionGuard
                 return;
             }
 
-            _alertService.StopAlarm();
-            _keyHook?.Dispose();
-            _keyHook = null;
             _monitorService.Stop();
             _heartbeatTimer?.Stop();
-            _serverPushService.SendHeartbeat(isMonitoring: false, isAlarming: false);
+            _serverPushService.SendHeartbeat(isMonitoring: false, isAlarming: false, isReady: _monitorService.IsReady);
             UpdateControlState(started: false);
             _log.Info(remote ? "[Server] 收到 pause，监控推理已停止。" : "监控已停止。");
             if (remote) _serverPushService.SendCommandAck("pause", true);
-        }
-
-        private void OnGlobalKeyDown(Keys key)
-        {
-            if (key == Keys.Space && _alertService.IsAlarming)
-            {
-                _alertService.StopAlarm();
-                _log.Info("用户按 Space 键，铃声已停止，推理恢复。");
-            }
         }
 
         // ════════════════════════════════════════════════════════════
@@ -416,26 +397,6 @@ namespace VisionGuard
             e.Snapshot?.Dispose();
         }
 
-        private void OnAlarmStarted(object sender, EventArgs e)
-        {
-            _monitorService.Pause();
-            BeginInvoke(new Action(() =>
-            {
-                _tsStatus.Text      = "⚠ 报警中 — 按 Space 停止";
-                _tsStatus.ForeColor = Color.OrangeRed;
-            }));
-        }
-
-        private void OnAlarmStopped(object sender, EventArgs e)
-        {
-            _monitorService.Resume();
-            BeginInvoke(new Action(() =>
-            {
-                _tsStatus.Text      = "● 监控中";
-                _tsStatus.ForeColor = Color.LimeGreen;
-            }));
-        }
-
         // ════════════════════════════════════════════════════════════
         // 配置构建
         // ════════════════════════════════════════════════════════════
@@ -450,8 +411,6 @@ namespace VisionGuard
                 AlertCooldownSeconds = ParseInt(_txtCooldown.Text, 1, 300,  5),
                 WatchedClasses       = _classPicker.SelectedClasses,
                 SaveAlertSnapshot    = true,
-                PlayAlertSound       = _chkPlaySound.Checked,
-                AlertSoundPath       = _txtSoundPath.Text == "默认系统音" ? string.Empty : _txtSoundPath.Text
             };
 
             if (_targetWindow != null)
@@ -487,14 +446,6 @@ namespace VisionGuard
             _txtFps.Text      = SettingsStore.GetInt("TargetFps",            2).ToString();
             _txtThreads.Text  = SettingsStore.GetInt("IntraOpNumThreads",    2).ToString();
             _txtCooldown.Text = SettingsStore.GetInt("AlertCooldownSeconds", 5).ToString();
-            _chkPlaySound.Checked = SettingsStore.GetBool("PlayAlertSound", true);
-
-            string soundPath = SettingsStore.GetString("AlertSoundPath", string.Empty);
-            if (!string.IsNullOrEmpty(soundPath) && File.Exists(soundPath))
-            {
-                _txtSoundPath.Text      = soundPath;
-                _txtSoundPath.ForeColor = Color.White;
-            }
 
             // 监控对象（中英文选择器）
             HashSet<string> watched = SettingsStore.GetStringList("WatchedClasses");
@@ -580,9 +531,6 @@ namespace VisionGuard
             SettingsStore.Set("TargetFps",               ParseInt(_txtFps.Text,      1,  5, 2));
             SettingsStore.Set("IntraOpNumThreads",        ParseInt(_txtThreads.Text,  1,  8, 2));
             SettingsStore.Set("AlertCooldownSeconds",     ParseInt(_txtCooldown.Text, 1, 300, 5));
-            SettingsStore.Set("PlayAlertSound",           _chkPlaySound.Checked);
-            SettingsStore.Set("AlertSoundPath",
-                _txtSoundPath.Text == "默认系统音" ? string.Empty : _txtSoundPath.Text);
 
             SettingsStore.Set("WatchedClasses",
                 string.Join(",", _classPicker.SelectedClasses));
@@ -782,9 +730,6 @@ namespace VisionGuard
             _btnSelectRegion.Enabled = !started;
             _btnPickWindow.Enabled   = !started;
             _txtFps.Enabled     = _txtThreads.Enabled = _txtCooldown.Enabled = !started;
-            _chkPlaySound.Enabled = !started;
-            _txtSoundPath.Enabled = !started && _chkPlaySound.Checked;
-            _btnPickSound.Enabled = !started && _chkPlaySound.Checked;
             _trkThreshold.Enabled = !started;
             _classPicker.Enabled  = !started;
 
@@ -853,8 +798,6 @@ namespace VisionGuard
             _heartbeatTimer?.Dispose();
             _serverPushService?.Dispose();
             _alertService?.StopAlarm();
-            _keyHook?.Dispose();
-            _keyHook = null;
             _monitorService?.Stop();
             _monitorService?.Dispose();
             _notifyIcon?.Dispose();
@@ -1078,41 +1021,6 @@ namespace VisionGuard
             _txtFps     = AddParamRow(_pageParams, "FPS：",    1, 5, 2, PadX, RowH, ref y);
             y += RowGap;
             _txtThreads = AddParamRow(_pageParams, "线程数：", 1, 8, 2, PadX, RowH, ref y);
-
-            // 铃声设置
-            y += fh;
-            _pageParams.Controls.Add(MakeTitle("铃声设置", PadX, ref y, fh));
-
-            int chkH = fh + 6;
-            _chkPlaySound = new CheckBox
-            {
-                Text = "警报铃声", Left = PadX, Top = y, Height = chkH,
-                Width = _pageParams.ClientSize.Width - PadX * 2,
-                Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top,
-                ForeColor = Color.LightGray, Checked = true
-            };
-            _pageParams.Controls.Add(_chkPlaySound);
-            y += chkH + RowGap;
-
-            int pickW = fh + 8;
-            _txtSoundPath = new TextBox
-            {
-                Left = PadX, Top = y, Height = RowH,
-                Width = _pageParams.ClientSize.Width - PadX * 2 - pickW - 4,
-                Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top,
-                BackColor = Color.FromArgb(45, 45, 45), ForeColor = Color.DimGray,
-                Text = "默认系统音", ReadOnly = true
-            };
-            _btnPickSound = new FlatRoundButton
-            {
-                Text = "…", Top = y, Width = pickW, Height = RowH,
-                Left = _pageParams.ClientSize.Width - PadX - pickW,
-                Anchor = AnchorStyles.Right | AnchorStyles.Top,
-                NormalColor = Color.FromArgb(60, 60, 60), HoverColor = Color.FromArgb(75, 75, 75),
-                ForeColor = Color.White
-            };
-            _pageParams.Controls.Add(_txtSoundPath);
-            _pageParams.Controls.Add(_btnPickSound);
         }
 
         // ════════════════════════════════════════════════════════════
@@ -1174,26 +1082,10 @@ namespace VisionGuard
             y += 26;
 
             // ── 服务器信息（只读展示）───────────────────────────────
-            _pageServer.Controls.Add(new Label
-            {
-                Text = "服务器：••••••••（已内置）",
-                Left = PadX, Top = y, AutoSize = true,
-                ForeColor = Color.FromArgb(120, 120, 120),
-            });
-            y += 20;
-
-            _pageServer.Controls.Add(new Label
-            {
-                Text = "API Key：••••••••（已内置）",
-                Left = PadX, Top = y, AutoSize = true,
-                ForeColor = Color.FromArgb(120, 120, 120),
-            });
-            y += 28;
-
             // ── 手动重试 按钮 ────────────────────────────────────────
             _btnRetry = new FlatRoundButton
             {
-                Text = "手动重试连接", Left = PadX, Top = y, Width = 120, Height = 28,
+                Text = "重试连接", Left = PadX, Top = y, Width = 100, Height = 28,
             };
             _pageServer.Controls.Add(_btnRetry);
             y += 36;
@@ -1252,7 +1144,7 @@ namespace VisionGuard
             _pageServer.Controls.Add(new Label
             {
                 Text = "排查建议：\r\n" +
-                       "• 未连接 → 检查网络，或点「手动重试」\r\n" +
+                       "• 未连接 → 检查网络，或点「重试连接」\r\n" +
                        "• 长时间连接中 → 确认服务器网络可访问\r\n" +
                        "• 认证失败 → API Key 已更新，需重新打包程序",
                 Left = PadX, Top = y,
@@ -1311,29 +1203,6 @@ namespace VisionGuard
             // 参数页事件
             _trkThreshold.ValueChanged += (s, e) =>
                 _lblThreshold.Text = (_trkThreshold.Value / 100f).ToString("F2");
-
-            _chkPlaySound.CheckedChanged += (s, e) =>
-            {
-                _txtSoundPath.Enabled = _chkPlaySound.Checked;
-                _btnPickSound.Enabled = _chkPlaySound.Checked;
-            };
-
-            _btnPickSound.Click += (s, e) =>
-            {
-                using (var dlg = new OpenFileDialog
-                {
-                    Title  = "选择警报铃声（WAV）",
-                    Filter = "WAV 音频|*.wav",
-                    CheckFileExists = true
-                })
-                {
-                    if (dlg.ShowDialog() == DialogResult.OK)
-                    {
-                        _txtSoundPath.Text      = dlg.FileName;
-                        _txtSoundPath.ForeColor = Color.White;
-                    }
-                }
-            };
 
             // 目标页事件
             _classPicker.SelectionChanged += (s, e) => { /* 可在此实时更新状态显示 */ };

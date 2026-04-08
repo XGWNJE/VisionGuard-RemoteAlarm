@@ -11,29 +11,25 @@ package com.xgwnje.visionguard_android.service
 
 import android.app.NotificationManager
 import android.content.Intent
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.os.Binder
 import android.os.IBinder
+import android.os.PowerManager
 import android.util.Log
 import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
 import com.xgwnje.visionguard_android.AppConstants
 import com.xgwnje.visionguard_android.data.model.AlertMessage
 import com.xgwnje.visionguard_android.data.model.DeviceInfo
+import com.xgwnje.visionguard_android.data.model.ScreenshotData
 import com.xgwnje.visionguard_android.data.remote.WebSocketClient
 import com.xgwnje.visionguard_android.data.remote.WsState
 import com.xgwnje.visionguard_android.data.repository.SettingsRepository
 import com.xgwnje.visionguard_android.util.NotificationHelper
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
-import okhttp3.Request
 import java.util.concurrent.atomic.AtomicInteger
 
 private const val TAG = "VG_FgService"
@@ -60,10 +56,17 @@ class AlertForegroundService : LifecycleService() {
     val commandAck: SharedFlow<Pair<String, Boolean>> = _commandAck
 
     // ── 内部状态 ──────────────────────────────────────────────
-    private lateinit var wsClient: WebSocketClient
+    private val wsClient = WebSocketClient()
     private lateinit var settingsRepo: SettingsRepository
     private lateinit var nm: NotificationManager
     private val notifIdCounter = AtomicInteger(1000)
+    private var wakeLock: PowerManager.WakeLock? = null
+
+    // ── 截图按需请求（透传 wsClient）────────────────────────
+    val onScreenshotData: SharedFlow<ScreenshotData> = wsClient.onScreenshotData
+
+    fun requestScreenshot(alertId: String, deviceId: String): Boolean =
+        wsClient.requestScreenshot(alertId, deviceId)
 
     // ── 生命周期 ──────────────────────────────────────────────
 
@@ -72,13 +75,19 @@ class AlertForegroundService : LifecycleService() {
         nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         NotificationHelper.createChannels(this)
         settingsRepo = SettingsRepository(applicationContext)
-        wsClient = WebSocketClient()
 
         // 启动前台通知
         startForeground(
             NotificationHelper.FOREGROUND_NOTIF_ID,
             NotificationHelper.buildForegroundNotification(this, "正在连接...")
         )
+
+        // 获取 WakeLock 防止后台时被 Doze 挂起（10分钟超时兜底，防止崩溃时泄漏）
+        wakeLock = (getSystemService(POWER_SERVICE) as PowerManager).newWakeLock(
+            PowerManager.PARTIAL_WAKE_LOCK,
+            "VisionGuard:WebSocket"
+        )
+        wakeLock?.acquire(10 * 60 * 1000L)
 
         // 订阅 WS 状态 → 更新前台通知
         lifecycleScope.launch {
@@ -140,6 +149,15 @@ class AlertForegroundService : LifecycleService() {
     override fun onDestroy() {
         super.onDestroy()
         wsClient.disconnect()
+        wakeLock?.let {
+            if (it.isHeld) it.release()
+        }
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        Log.w(TAG, "onTrimMemory: level=$level")
+        // 仅在内存严重不足时打印日志，不主动断开连接
     }
 
     // ── 公开 API ──────────────────────────────────────────────
@@ -167,32 +185,10 @@ class AlertForegroundService : LifecycleService() {
     // ── 通知发送 ──────────────────────────────────────────────
 
     private fun sendAlertNotification(alert: AlertMessage) {
-        lifecycleScope.launch(Dispatchers.IO) {
-            val bitmap = tryLoadThumbnail(alert)
-            val notifId = notifIdCounter.incrementAndGet()
-            val notif = NotificationHelper.buildAlertNotification(
-                this@AlertForegroundService, alert, notifId, bitmap
-            )
-            nm.notify(notifId, notif)
-        }
-    }
-
-    private suspend fun tryLoadThumbnail(alert: AlertMessage): Bitmap? {
-        if (alert.screenshotUrl.isEmpty()) return null
-        return try {
-            val url = AppConstants.SERVER_URL + alert.screenshotUrl + "?key=" + AppConstants.API_KEY
-            val req = Request.Builder().url(url).build()
-            val client = OkHttpClient()
-            val bytes = withContext(Dispatchers.IO) {
-                client.newCall(req).execute().use { it.body?.bytes() }
-            } ?: return null
-            val full = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return null
-            val ratio = 256.0 / full.width
-            val h = (full.height * ratio).toInt()
-            Bitmap.createScaledBitmap(full, 256, h, true)
-        } catch (e: Exception) {
-            Log.w(TAG, "缩略图加载失败: ${e.message}")
-            null
-        }
+        val notifId = notifIdCounter.incrementAndGet()
+        val notif = NotificationHelper.buildAlertNotification(
+            this@AlertForegroundService, alert, notifId, null
+        )
+        nm.notify(notifId, notif)
     }
 }

@@ -52,3 +52,13 @@ data class WsCommandAck(
     val success: Boolean = false,
     val reason: String = ""
 )
+
+/** Android → 服务器：请求指定设备的截图 */
+data class WsScreenshotDataMessage(
+    val type: String = "request-screenshot",
+    val alertId: String,
+    val targetDeviceId: String = "",
+    val imageBase64: String = "",   // 服务器回传时才有值
+    val width: Int = 0,
+    val height: Int = 0
+)

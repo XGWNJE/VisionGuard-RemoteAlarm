@@ -24,6 +24,7 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:launchMode="singleTop"
             android:label="@string/app_name"
             android:theme="@style/Theme.VisionGuard_Android">
             <intent-filter>
@@ -35,6 +36,7 @@
         <service
             android:name=".service.AlertForegroundService"
             android:foregroundServiceType="remoteMessaging"
+            android:stopWithTask="false"
             android:exported="false" />
 
         <receiver

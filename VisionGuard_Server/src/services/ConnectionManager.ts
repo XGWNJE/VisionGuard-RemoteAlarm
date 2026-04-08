@@ -12,10 +12,14 @@ import type {
   WsAuthMessage, WsHeartbeat, WsCommand, WsSetConfig,
   WindowsClient, AndroidClient, WsAlertPush,
   DeviceStatus, WsCommandRelay, WsSetConfigRelay, WsCommandAck,
+  WsRequestScreenshot, WsRequestScreenshotRelay, WsScreenshotData,
 } from '../models/types';
 
 const windowsClients = new Map<string, WindowsClient>();
 const androidClients = new Map<string, AndroidClient>();
+
+// 追踪待处理的截图请求：alertId → androidDeviceId（用于 screenshot-data 回传路由）
+const pendingScreenshotRequests = new Map<string, string>();
 
 // ── 公开 API ──────────────────────────────────────────────
 
@@ -55,6 +59,9 @@ export function handleConnection(ws: WebSocket): void {
       case 'heartbeat':
         if (role === 'windows') handleHeartbeat(msg as WsHeartbeat);
         break;
+      case 'alert':
+        if (role === 'windows') broadcastAlert(msg as WsAlertPush);
+        break;
       case 'command':
         if (role === 'android') handleCommand(ws, msg as WsCommand);
         break;
@@ -64,6 +71,12 @@ export function handleConnection(ws: WebSocket): void {
       case 'command-ack':
         // Windows 端主动发回的 ack（含前置校验错误原因），转发给所有 Android
         if (role === 'windows') handleWindowsCommandAck(msg as WsCommandAck, deviceId!);
+        break;
+      case 'request-screenshot':
+        if (role === 'android') handleRequestScreenshot(ws, msg as WsRequestScreenshot, deviceId!);
+        break;
+      case 'screenshot-data':
+        if (role === 'windows') handleScreenshotData(msg as WsScreenshotData);
         break;
     }
   });
@@ -129,6 +142,7 @@ function handleAuth(
       deviceName: msg.deviceName,
       isMonitoring: false,
       isAlarming: false,
+      isReady: false,
       lastSeen: new Date(),
     });
     console.log(`[ws] Windows 设备上线: ${msg.deviceName} (${msg.deviceId})`);
@@ -159,10 +173,12 @@ function handleHeartbeat(msg: WsHeartbeat): void {
 
   const changed =
     client.isMonitoring !== msg.isMonitoring ||
-    client.isAlarming !== msg.isAlarming;
+    client.isAlarming !== msg.isAlarming ||
+    client.isReady !== msg.isReady;
 
   client.isMonitoring = msg.isMonitoring;
   client.isAlarming = msg.isAlarming;
+  client.isReady = msg.isReady ?? false;
   client.lastSeen = new Date();
 
   if (changed) broadcastDeviceList();
@@ -236,6 +252,36 @@ function handleWindowsCommandAck(ack: WsCommandAck, windowsDeviceId: string): vo
   }
 }
 
+/** Android 请求截图：转发给目标 Windows，登记待回传路由 */
+function handleRequestScreenshot(senderWs: WebSocket, msg: WsRequestScreenshot, senderDeviceId: string): void {
+  const target = windowsClients.get(msg.targetDeviceId);
+  if (!target || target.ws.readyState !== WebSocket.OPEN) {
+    // 目标不在线，直接告知 Android
+    sendJson(senderWs, {
+      type: 'screenshot-data',
+      alertId: msg.alertId,
+      imageBase64: '',
+      width: 0,
+      height: 0,
+    });
+    return;
+  }
+  // 登记路由：alertId → 发起请求的 Android deviceId（用于 screenshot-data 回传）
+  pendingScreenshotRequests.set(msg.alertId, senderDeviceId);
+  const relay: WsRequestScreenshotRelay = { type: 'request-screenshot', alertId: msg.alertId };
+  target.ws.send(JSON.stringify(relay));
+}
+
+/** Windows 回传截图数据：路由给发起请求的 Android */
+function handleScreenshotData(msg: WsScreenshotData): void {
+  const targetDeviceId = pendingScreenshotRequests.get(msg.alertId);
+  if (!targetDeviceId) return;
+  pendingScreenshotRequests.delete(msg.alertId);
+  const targetClient = androidClients.get(targetDeviceId);
+  if (!targetClient || targetClient.ws.readyState !== WebSocket.OPEN) return;
+  targetClient.ws.send(JSON.stringify(msg));
+}
+
 function broadcastDeviceList(): void {
   const list = buildDeviceList();
   const data = JSON.stringify({ type: 'device-list', devices: list });
@@ -256,6 +302,7 @@ function buildDeviceList(): DeviceStatus[] {
       online: (now - c.lastSeen.getTime()) < config.deviceOfflineMs,
       isMonitoring: c.isMonitoring,
       isAlarming: c.isAlarming,
+      isReady: c.isReady,
       lastSeen: c.lastSeen.toISOString(),
     });
   }

@@ -84,7 +84,8 @@ fun DeviceCard(
                         !device.online      -> "⬜ 离线"
                         device.isAlarming   -> "🔴 报警中"
                         device.isMonitoring -> "🟢 监控中"
-                        else                -> "⚪ 已暂停"
+                        !device.isReady     -> "⚪ 选区未设定"
+                        else                -> "🟡 已就绪"
                     }
                     Text(
                         text = statusText,

@@ -11,14 +11,16 @@ namespace VisionGuard.Models
 {
     public class AlertEvent : EventArgs
     {
+        public string AlertId { get; }
         public DateTime Timestamp { get; }
         public IReadOnlyList<Detection> Detections { get; }
         // 调用方负责 Dispose，AlertService 不持有引用
         public Bitmap Snapshot { get; }
 
-        public AlertEvent(IReadOnlyList<Detection> detections, Bitmap snapshot)
+        public AlertEvent(string alertId, IReadOnlyList<Detection> detections, Bitmap snapshot)
         {
-            Timestamp  = DateTime.Now;
+            AlertId   = alertId;
+            Timestamp = DateTime.Now;
             Detections = detections;
             Snapshot   = snapshot;
         }

@@ -1,16 +1,16 @@
 // ┌─────────────────────────────────────────────────────────┐
 // │ ServerPushService.cs                                    │
-// │ 角色：HTTP 报警上传 + WebSocket 客户端（心跳+命令接收）  │
-// │ 依赖：WebSocketSharp, SimpleJson, AlertEvent, LogManager │
+// │ 角色：WebSocket 客户端（心跳+命令接收+截图按需转发）     │
 // │ 对外 API：Configure(), PushAlert(), SendHeartbeat(),    │
 // │           Disconnect(), IsConnected, 事件               │
 // │ 特性：ServerUrl 为空时完全静默，离线失败不影响本地流程   │
 // └─────────────────────────────────────────────────────────┘
 using System;
 using System.Collections.Generic;
-using System.Drawing;   
+using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
+using System.Linq;
 using System.Net.Http;
 using System.Text;
 using System.Threading;
@@ -85,81 +85,76 @@ namespace VisionGuard.Services
         }
 
         /// <summary>
-        /// 上传报警（fire-and-forget）。
-        /// 在调用线程克隆截图字节，然后 Task.Run 发 HTTP POST。
-        /// 失败仅记录日志，不影响本地报警流程。
+        /// 上传报警元数据（截图改为本地缓存，不上传到 VPS）。
+        /// 截图由 Android 按需从 Windows 拉取。
         /// </summary>
         public void PushAlert(AlertEvent alert)
         {
             if (!_configured || alert == null) return;
 
-            // 立刻在调用线程克隆 PNG bytes（不持有 Bitmap 引用）
-            byte[] pngBytes = null;
+            var msg = new Dictionary<string, object>
+            {
+                ["type"]      = "alert",
+                ["alertId"]   = alert.AlertId,
+                ["deviceId"]  = _deviceId,
+                ["deviceName"] = _deviceName,
+                ["timestamp"] = alert.Timestamp.ToString("o"),
+                ["detections"] = BuildDetectionsPayload(alert.Detections),
+            };
+            WsSendJson(msg);
+        }
+
+        /// <summary>
+        /// 处理 Android 按需请求的截图：读本地文件 → JPEG 压缩 → base64 → WS 发送。
+        /// </summary>
+        public void SendScreenshotData(string alertId)
+        {
+            if (!_configured || !_wsConnected || _ws == null) return;
+
             try
             {
-                if (alert.Snapshot != null)
+                string path = AlertService.GetSnapshotPath(alertId);
+                if (!File.Exists(path))
                 {
+                    LogManager.StaticWarn($"[Server] 截图不存在: {alertId}");
+                    return;
+                }
+
+                using (var bmp = new Bitmap(path))
+                {
+                    int w = bmp.Width, h = bmp.Height;
                     using (var ms = new MemoryStream())
                     {
-                        alert.Snapshot.Save(ms, ImageFormat.Png);
-                        pngBytes = ms.ToArray();
+                        // JPEG 压缩质量 70，减少带宽占用
+                        var jpegParams = new System.Drawing.Imaging.EncoderParameters(1);
+                        jpegParams.Param[0] = new System.Drawing.Imaging.EncoderParameter(
+                            System.Drawing.Imaging.Encoder.Quality, 70L);
+                        var jpegCodec = System.Drawing.Imaging.ImageCodecInfo
+                            .GetImageEncoders().FirstOrDefault(c => c.MimeType == "image/jpeg");
+                        bmp.Save(ms, jpegCodec, jpegParams);
+                        byte[] jpegBytes = ms.ToArray();
+
+                        var msg = new Dictionary<string, object>
+                        {
+                            ["type"]        = "screenshot-data",
+                            ["alertId"]     = alertId,
+                            ["imageBase64"] = Convert.ToBase64String(jpegBytes),
+                            ["width"]       = w,
+                            ["height"]      = h,
+                        };
+                        WsSendJson(msg);
+                        LogManager.StaticInfo($"[Server] 截图发送: {alertId} ({jpegBytes.Length} bytes)");
                     }
                 }
             }
-            catch { /* 截图克隆失败，继续上传 meta */ }
-
-            var detections = alert.Detections;
-            var timestamp  = alert.Timestamp;
-
-            Task.Run(async () =>
+            catch (Exception ex)
             {
-                try
-                {
-                    var meta = new Dictionary<string, object>
-                    {
-                        ["deviceId"]   = _deviceId,
-                        ["deviceName"] = _deviceName,
-                        ["timestamp"]  = timestamp.ToString("o"),
-                        ["detections"] = BuildDetectionsPayload(detections),
-                    };
-
-                    using (var form = new MultipartFormDataContent())
-                    {
-                        var metaContent = new StringContent(
-                            SimpleJson.ToJson(meta), Encoding.UTF8, "application/json");
-                        form.Add(metaContent, "meta");
-
-                        if (pngBytes != null && pngBytes.Length > 0)
-                        {
-                            var imgContent = new ByteArrayContent(pngBytes);
-                            imgContent.Headers.ContentType =
-                                new System.Net.Http.Headers.MediaTypeHeaderValue("image/png");
-                            form.Add(imgContent, "screenshot", "screenshot.png");
-                        }
-
-                        var req = new HttpRequestMessage(HttpMethod.Post, _serverUrl + "/api/alert")
-                        {
-                            Content = form
-                        };
-                        req.Headers.Add("X-API-Key", _apiKey);
-
-                        var resp = await _http.SendAsync(req).ConfigureAwait(false);
-                        if (!resp.IsSuccessStatusCode)
-                        {
-                            string body = await resp.Content.ReadAsStringAsync().ConfigureAwait(false);
-                            LogManager.StaticWarn($"[Server] 上传报警失败 {(int)resp.StatusCode}: {body}");
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    LogManager.StaticWarn($"[Server] PushAlert 异常: {ex.Message}");
-                }
-            });
+                LogManager.StaticWarn($"[Server] SendScreenshotData 异常: {ex.Message}");
+            }
         }
 
-        /// <summary>发送心跳（30秒定时器调用）</summary>
-        public void SendHeartbeat(bool isMonitoring, bool isAlarming)
+        /// <summary>发送心跳（5秒定时器调用）</summary>
+        public void SendHeartbeat(bool isMonitoring, bool isAlarming, bool isReady)
         {
             if (!_configured || !_wsConnected || _ws == null) return;
 
@@ -169,6 +164,7 @@ namespace VisionGuard.Services
                 ["deviceId"]    = _deviceId,
                 ["isMonitoring"] = isMonitoring,
                 ["isAlarming"]  = isAlarming,
+                ["isReady"]     = isReady,
             };
             WsSendJson(msg);
         }
@@ -347,6 +343,12 @@ namespace VisionGuard.Services
                     string val = SimpleJson.GetString(d, "value");
                     if (!string.IsNullOrEmpty(key))
                         SetConfigReceived?.Invoke(this, new KeyValuePair<string, string>(key, val));
+                }
+                else if (type == "request-screenshot")
+                {
+                    string alertId = SimpleJson.GetString(d, "alertId");
+                    if (!string.IsNullOrEmpty(alertId))
+                        SendScreenshotData(alertId);
                 }
             }
             catch { }

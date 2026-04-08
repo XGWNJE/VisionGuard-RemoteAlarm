@@ -12,5 +12,6 @@ data class DeviceInfo(
     val online: Boolean,
     val isMonitoring: Boolean,
     val isAlarming: Boolean,
+    val isReady: Boolean,           // 选区是否已设定
     val lastSeen: String            // ISO 8601
 )

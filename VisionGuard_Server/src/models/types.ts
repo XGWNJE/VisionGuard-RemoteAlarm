@@ -42,7 +42,9 @@ export type WsMessageType =
   | 'device-list'
   | 'command'
   | 'command-ack'
-  | 'set-config';
+  | 'set-config'
+  | 'request-screenshot'
+  | 'screenshot-data';
 
 /** 客户端 → 服务器：认证 */
 export interface WsAuthMessage {
@@ -60,12 +62,13 @@ export interface WsAuthResult {
   reason?: string;
 }
 
-/** Windows → 服务器：心跳 (每 30 秒) */
+/** Windows → 服务器：心跳 (每 5 秒) */
 export interface WsHeartbeat {
   type: 'heartbeat';
   deviceId: string;
   isMonitoring: boolean;
   isAlarming: boolean;
+  isReady: boolean;   // 选区是否已设定
 }
 
 /** 服务器 → Android：报警推送 */
@@ -91,6 +94,7 @@ export interface DeviceStatus {
   online: boolean;
   isMonitoring: boolean;
   isAlarming: boolean;
+  isReady: boolean;           // 选区是否已设定
   lastSeen: string;           // ISO 8601
 }
 
@@ -122,6 +126,28 @@ export interface WsSetConfigRelay {
   value: string;
 }
 
+/** Android → 服务器：请求指定设备的截图（服务器转发给 Windows） */
+export interface WsRequestScreenshot {
+  type: 'request-screenshot';
+  alertId: string;
+  targetDeviceId: string;
+}
+
+/** 服务器 → Windows：转发截图请求 */
+export interface WsRequestScreenshotRelay {
+  type: 'request-screenshot';
+  alertId: string;
+}
+
+/** Windows → 服务器 → Android：截图数据（base64 JPEG） */
+export interface WsScreenshotData {
+  type: 'screenshot-data';
+  alertId: string;
+  imageBase64: string;
+  width: number;
+  height: number;
+}
+
 /** 服务器 → Android：命令确认（服务器生成 或 Windows 主动回包） */
 export interface WsCommandAck {
   type: 'command-ack';
@@ -141,6 +167,7 @@ export interface WindowsClient {
   deviceName: string;
   isMonitoring: boolean;
   isAlarming: boolean;
+  isReady: boolean;
   lastSeen: Date;
 }
 

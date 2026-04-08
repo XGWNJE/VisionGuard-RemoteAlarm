@@ -28,8 +28,6 @@ namespace VisionGuard.Models
         public HashSet<string> WatchedClasses { get; set; } = new HashSet<string>();
         public int AlertCooldownSeconds { get; set; } = 5;
         public bool SaveAlertSnapshot { get; set; } = true;
-        public bool   PlayAlertSound   { get; set; } = true;
-        public string AlertSoundPath   { get; set; } = string.Empty;
 
         // ── 新增字段 ─────────────────────────────────────────────────
         /// <summary>捕获模式：屏幕区域或窗口句柄</summary>

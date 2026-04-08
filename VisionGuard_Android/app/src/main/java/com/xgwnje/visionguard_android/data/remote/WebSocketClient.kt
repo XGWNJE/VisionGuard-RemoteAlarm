@@ -14,8 +14,10 @@ import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.xgwnje.visionguard_android.data.model.AlertMessage
 import com.xgwnje.visionguard_android.data.model.DeviceInfo
+import com.xgwnje.visionguard_android.data.model.ScreenshotData
 import com.xgwnje.visionguard_android.data.model.WsAuthMessage
 import com.xgwnje.visionguard_android.data.model.WsCommandMessage
+import com.xgwnje.visionguard_android.data.model.WsScreenshotDataMessage
 import com.xgwnje.visionguard_android.data.model.WsSetConfigMessage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -61,6 +63,9 @@ class WebSocketClient {
     private val _onCommandAck = MutableSharedFlow<Pair<String, Boolean>>(extraBufferCapacity = 8)
     val onCommandAck: SharedFlow<Pair<String, Boolean>> = _onCommandAck  // <command, success>
 
+    private val _onScreenshotData = MutableSharedFlow<ScreenshotData>(extraBufferCapacity = 8)
+    val onScreenshotData: SharedFlow<ScreenshotData> = _onScreenshotData
+
     private var serverUrl: String = ""
     private var apiKey: String = ""
     private var deviceId: String = ""
@@ -105,6 +110,11 @@ class WebSocketClient {
     fun sendSetConfig(targetDeviceId: String, key: String, value: String) {
         val msg = WsSetConfigMessage(targetDeviceId = targetDeviceId, key = key, value = value)
         ws?.send(gson.toJson(msg))
+    }
+
+    fun requestScreenshot(alertId: String, targetDeviceId: String): Boolean {
+        val msg = WsScreenshotDataMessage(alertId = alertId, targetDeviceId = targetDeviceId)
+        return ws?.send(gson.toJson(msg)) ?: false
     }
 
     // ── 连接循环 ──────────────────────────────────────────────
@@ -193,8 +203,8 @@ class WebSocketClient {
                     } else {
                         val reason = obj.get("reason")?.asString ?: "unknown"
                         Log.w(TAG, "WS 认证失败: $reason")
-                        _connectionState.value = WsState.AUTH_FAILED
-                        shouldReconnect = false  // 认证失败，不再重连（需要用户重新配置）
+                        _connectionState.value = WsState.DISCONNECTED
+                        // 继续自动重连，下次可能成功（如服务器重启后 Key 恢复）
                     }
                 }
                 "alert" -> {
@@ -215,6 +225,16 @@ class WebSocketClient {
                         // 将 reason 附在 command 后面，DeviceListScreen 显示时可读取
                         val display = if (!success && reason.isNotEmpty()) "$cmd（$reason）" else cmd
                         scope.launch { _onCommandAck.emit(Pair(display, success)) }
+                    }
+                }
+                "screenshot-data" -> {
+                    val data = gson.fromJson(text, WsScreenshotDataMessage::class.java)
+                    if (data.imageBase64.isNotEmpty()) {
+                        scope.launch {
+                            _onScreenshotData.emit(
+                                ScreenshotData(data.alertId, data.imageBase64, data.width, data.height)
+                            )
+                        }
                     }
                 }
                 else -> Log.d(TAG, "未知消息 type=$type")

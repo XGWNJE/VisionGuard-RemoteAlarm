@@ -115,8 +115,7 @@ namespace VisionGuard
         {
             base.OnShown(e);
 
-            var ver = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
-            this.Text = $"VisionGuard v{ver.Major}.{ver.Minor}";
+            this.Text = "VisionGuard";
 
             // 构建4个页面内容
             BuildCapturePage();
@@ -355,7 +354,8 @@ namespace VisionGuard
             }
 
             _monitorService.Stop();
-            _heartbeatTimer?.Stop();
+            // 不停止心跳定时器：服务器依赖心跳判断在线状态，停止心跳会导致 Android 误报掉线
+            // isMonitoring=false 通过下次 tick 自动传递，同时立即发一次最终状态
             _serverPushService.SendHeartbeat(isMonitoring: false, isAlarming: false, isReady: _monitorService.IsReady);
             UpdateControlState(started: false);
             _log.Info(remote ? "[Server] 收到 pause，监控推理已停止。" : "监控已停止。");
@@ -861,10 +861,10 @@ namespace VisionGuard
 
             // 加载菜单图标
             var assetPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Assets");
-            var imgCapture  = Image.FromFile(Path.Combine(assetPath, "信号捕获.png"));
-            var imgParams   = Image.FromFile(Path.Combine(assetPath, "参数.png"));
-            var imgTargets  = Image.FromFile(Path.Combine(assetPath, "目标-F.png"));
-            var imgServer   = Image.FromFile(Path.Combine(assetPath, "服务器.png"));
+            var imgCapture  = Image.FromFile(Path.Combine(assetPath, "capture.png"));
+            var imgParams   = Image.FromFile(Path.Combine(assetPath, "settings.png"));
+            var imgTargets  = Image.FromFile(Path.Combine(assetPath, "target.png"));
+            var imgServer   = Image.FromFile(Path.Combine(assetPath, "server.png"));
 
             _menuCapture = new MenuButton { Text = "捕获", IconImage = imgCapture, Dock = DockStyle.Top };
             _menuParams  = new MenuButton { Text = "参数", IconImage = imgParams,  Dock = DockStyle.Top };
@@ -918,8 +918,8 @@ namespace VisionGuard
                 ColumnCount = 2,
                 RowCount    = 1
             };
-            contentLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 52F));
-            contentLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 48F));
+            contentLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 58F));
+            contentLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 42F));
             contentLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
             contentLayout.Controls.Add(_leftSplit,     0, 0);
             contentLayout.Controls.Add(_pageContainer, 1, 0);
@@ -1221,7 +1221,7 @@ namespace VisionGuard
             try
             {
                 int h = _leftSplit.Height;
-                int target = (int)(h * 0.70);
+                int target = (int)(h * 0.60);
                 target = Math.Max(_leftSplit.Panel1MinSize,
                          Math.Min(h - _leftSplit.Panel2MinSize, target));
                 _leftSplit.SplitterDistance = target;

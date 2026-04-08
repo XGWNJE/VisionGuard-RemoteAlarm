@@ -105,7 +105,8 @@ namespace VisionGuard.Services
         }
 
         /// <summary>
-        /// 处理 Android 按需请求的截图：读本地文件 → JPEG 压缩 → base64 → WS 发送。
+        /// 处理 Android 按需请求的截图：读本地文件 → 等比缩放 → JPEG 压缩 → base64 → WS 发送。
+        /// 在 ThreadPool 线程上执行，不阻塞 WS 接收线程。
         /// </summary>
         public void SendScreenshotData(string alertId)
         {
@@ -122,28 +123,47 @@ namespace VisionGuard.Services
 
                 using (var bmp = new Bitmap(path))
                 {
-                    int w = bmp.Width, h = bmp.Height;
-                    using (var ms = new MemoryStream())
+                    // 等比缩放到最大宽 960px，减少传输大小
+                    const int MaxW = 960;
+                    Bitmap toSend;
+                    if (bmp.Width > MaxW)
                     {
-                        // JPEG 压缩质量 70，减少带宽占用
-                        var jpegParams = new System.Drawing.Imaging.EncoderParameters(1);
-                        jpegParams.Param[0] = new System.Drawing.Imaging.EncoderParameter(
-                            System.Drawing.Imaging.Encoder.Quality, 70L);
-                        var jpegCodec = System.Drawing.Imaging.ImageCodecInfo
-                            .GetImageEncoders().FirstOrDefault(c => c.MimeType == "image/jpeg");
-                        bmp.Save(ms, jpegCodec, jpegParams);
-                        byte[] jpegBytes = ms.ToArray();
+                        int newH = (int)(bmp.Height * (MaxW / (double)bmp.Width));
+                        toSend = new Bitmap(bmp, new Size(MaxW, newH));
+                    }
+                    else
+                    {
+                        toSend = bmp;
+                    }
 
-                        var msg = new Dictionary<string, object>
+                    try
+                    {
+                        using (var ms = new MemoryStream())
                         {
-                            ["type"]        = "screenshot-data",
-                            ["alertId"]     = alertId,
-                            ["imageBase64"] = Convert.ToBase64String(jpegBytes),
-                            ["width"]       = w,
-                            ["height"]      = h,
-                        };
-                        WsSendJson(msg);
-                        LogManager.StaticInfo($"[Server] 截图发送: {alertId} ({jpegBytes.Length} bytes)");
+                            // JPEG 压缩质量 65，960px 宽下约 80-150KB
+                            var jpegParams = new System.Drawing.Imaging.EncoderParameters(1);
+                            jpegParams.Param[0] = new System.Drawing.Imaging.EncoderParameter(
+                                System.Drawing.Imaging.Encoder.Quality, 65L);
+                            var jpegCodec = System.Drawing.Imaging.ImageCodecInfo
+                                .GetImageEncoders().FirstOrDefault(c => c.MimeType == "image/jpeg");
+                            toSend.Save(ms, jpegCodec, jpegParams);
+                            byte[] jpegBytes = ms.ToArray();
+
+                            var msg = new Dictionary<string, object>
+                            {
+                                ["type"]        = "screenshot-data",
+                                ["alertId"]     = alertId,
+                                ["imageBase64"] = Convert.ToBase64String(jpegBytes),
+                                ["width"]       = toSend.Width,
+                                ["height"]      = toSend.Height,
+                            };
+                            WsSendJson(msg);
+                            LogManager.StaticInfo($"[Server] 截图发送: {alertId} ({jpegBytes.Length} bytes, {toSend.Width}x{toSend.Height})");
+                        }
+                    }
+                    finally
+                    {
+                        if (!ReferenceEquals(toSend, bmp)) toSend.Dispose();
                     }
                 }
             }
@@ -348,7 +368,7 @@ namespace VisionGuard.Services
                 {
                     string alertId = SimpleJson.GetString(d, "alertId");
                     if (!string.IsNullOrEmpty(alertId))
-                        SendScreenshotData(alertId);
+                        Task.Run(() => SendScreenshotData(alertId));   // 异步，不阻塞 WS 接收线程
                 }
             }
             catch { }

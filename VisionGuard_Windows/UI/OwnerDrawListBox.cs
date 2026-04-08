@@ -1,6 +1,6 @@
 // ┌─────────────────────────────────────────────────────────┐
 // │ OwnerDrawListBox.cs                                     │
-// │ 角色：按日志级别着色的 ListBox（隐藏系统滚动条）        │
+// │ 角色：按日志级别着色的 ListBox，支持长文本自动折行       │
 // │ 用途：Form1 日志面板，配合 LogManager 使用              │
 // │ 着色规则：[WARN]→黄, [ERR]→红, 其他→灰白               │
 // └─────────────────────────────────────────────────────────┘
@@ -12,7 +12,7 @@ using System.Windows.Forms;
 namespace VisionGuard.UI
 {
     /// <summary>
-    /// Owner-Draw ListBox，按日志级别着色行文字。
+    /// Owner-Draw ListBox，按日志级别着色行文字，支持长文本自动折行。
     /// 继承 ListBox，可直接传给 LogManager(ListBox) 构造参数，无需修改 LogManager。
     /// 系统滚动条通过 WM_NCPAINT / WM_NCCALCSIZE 拦截隐藏。
     /// </summary>
@@ -80,27 +80,35 @@ namespace VisionGuard.UI
 
         public OwnerDrawListBox()
         {
-            DrawMode      = DrawMode.OwnerDrawFixed;
+            DrawMode      = DrawMode.OwnerDrawVariable;  // 支持动态行高（折行）
             BorderStyle   = BorderStyle.None;
             BackColor     = Color.FromArgb(15, 15, 15);
             ForeColor     = FgNormal;
             SelectionMode = SelectionMode.None;
-            // 字体继承自父容器（Form），不硬编码
-            // ItemHeight 在 OnFontChanged 里动态更新
-            UpdateItemHeight();
         }
 
         protected override void OnFontChanged(System.EventArgs e)
         {
             base.OnFontChanged(e);
-            UpdateItemHeight();
+            // 字体变化时刷新所有行高
+            RefreshItems();
         }
 
-        private void UpdateItemHeight()
+        // ── 动态行高（OwnerDrawVariable 必须实现）───────────────────
+
+        protected override void OnMeasureItem(MeasureItemEventArgs e)
         {
-            // 行高 = 字体高度 + 上下各 2px 行间距
-            ItemHeight = Font.Height + 4;
+            base.OnMeasureItem(e);
+            if (e.Index < 0 || e.Index >= Items.Count) return;
+
+            string text = Items[e.Index].ToString();
+            int availW  = Math.Max(ClientSize.Width - 4, 1);  // 左右各留 2px padding
+
+            SizeF sz = e.Graphics.MeasureString(text, Font, availW);
+            e.ItemHeight = Math.Max(Font.Height + 4, (int)Math.Ceiling(sz.Height) + 4);
         }
+
+        // ── 按日志级别着色，支持折行 ────────────────────────────────
 
         protected override void OnDrawItem(DrawItemEventArgs e)
         {
@@ -118,11 +126,18 @@ namespace VisionGuard.UI
             else if (text.Contains("[ERR]"))  fg = FgError;
             else                              fg = selected ? FgSel : FgNormal;
 
+            // 内缩 2px，避免文字紧贴边框
+            var bounds = Rectangle.FromLTRB(
+                e.Bounds.Left  + 2,
+                e.Bounds.Top   + 2,
+                e.Bounds.Right - 2,
+                e.Bounds.Bottom);
+
             TextRenderer.DrawText(
-                e.Graphics, text, Font, e.Bounds, fg,
+                e.Graphics, text, Font, bounds, fg,
                 TextFormatFlags.Left |
-                TextFormatFlags.VerticalCenter |
-                TextFormatFlags.EndEllipsis);
+                TextFormatFlags.Top  |
+                TextFormatFlags.WordBreak);   // 自动折行，不截断
         }
     }
 }

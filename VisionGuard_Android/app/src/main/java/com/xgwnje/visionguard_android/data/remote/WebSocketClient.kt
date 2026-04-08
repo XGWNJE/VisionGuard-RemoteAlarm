@@ -28,6 +28,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -57,8 +58,8 @@ class WebSocketClient {
     private val _onAlert = MutableSharedFlow<AlertMessage>(extraBufferCapacity = 64)
     val onAlert: SharedFlow<AlertMessage> = _onAlert
 
-    private val _onDeviceList = MutableSharedFlow<List<DeviceInfo>>(extraBufferCapacity = 8)
-    val onDeviceList: SharedFlow<List<DeviceInfo>> = _onDeviceList
+    private val _onDeviceList = MutableStateFlow<List<DeviceInfo>>(emptyList())
+    val onDeviceList: StateFlow<List<DeviceInfo>> = _onDeviceList.asStateFlow()
 
     private val _onCommandAck = MutableSharedFlow<Pair<String, Boolean>>(extraBufferCapacity = 8)
     val onCommandAck: SharedFlow<Pair<String, Boolean>> = _onCommandAck  // <command, success>
@@ -214,7 +215,7 @@ class WebSocketClient {
                 "device-list" -> {
                     val devicesArr = obj.getAsJsonArray("devices")
                     val devices = devicesArr?.map { gson.fromJson(it, DeviceInfo::class.java) } ?: emptyList()
-                    scope.launch { _onDeviceList.emit(devices) }
+                    _onDeviceList.value = devices
                 }
                 "command-ack" -> {
                     val cmd     = obj.get("command")?.asString ?: ""

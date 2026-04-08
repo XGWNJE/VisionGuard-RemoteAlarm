@@ -1,3 +1,6 @@
+# ===== 根目录 =====
+dist/
+
 # ===== Windows 端 =====
 VisionGuard_Windows/bin/
 VisionGuard_Windows/obj/
@@ -17,6 +20,8 @@ VisionGuard_Server/data/screenshots/
 
 # ===== Android 端 =====
 VisionGuard_Android/*.iml
+VisionGuard_Android/keystore.properties
+VisionGuard_Android/app/*.jks
 VisionGuard_Android/.gradle/
 VisionGuard_Android/.idea/
 VisionGuard_Android/local.properties

@@ -35,6 +35,10 @@ dist/
 *.png
 !Assets/screenshot.png
 
+# ===== 其他不需要入库的文件 =====
+dist/
+
+
 # ===== 模型文件说明 =====
 # Assets/yolov5nu.onnx 需要手动下载，见 readme.md 中的说明
 # 如果文件超过 50MB 请使用 Git LFS：git lfs track "*.onnx"

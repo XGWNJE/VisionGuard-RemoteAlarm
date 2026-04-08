@@ -143,6 +143,13 @@ function handleAuth(
 
   sendJson(ws, { type: 'auth-result', success: true });
   onSuccess(msg.role, msg.deviceId);
+
+  // 认证成功后，立即向本客户端发送完整设备列表（解决客户端就绪时序问题）
+  sendJson(ws, {
+    type: 'device-list',
+    devices: buildDeviceList(),
+  });
+
   broadcastDeviceList();
 }
 

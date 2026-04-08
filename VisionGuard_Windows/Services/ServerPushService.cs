@@ -1,22 +1,21 @@
 // ┌─────────────────────────────────────────────────────────┐
 // │ ServerPushService.cs                                    │
 // │ 角色：HTTP 报警上传 + WebSocket 客户端（心跳+命令接收）  │
-// │ 线程：WS 接收在独立后台线程；PushAlert 用 Task.Run      │
-// │ 依赖：SimpleJson, AlertEvent, LogManager                │
+// │ 依赖：WebSocketSharp, SimpleJson, AlertEvent, LogManager │
 // │ 对外 API：Configure(), PushAlert(), SendHeartbeat(),    │
 // │           Disconnect(), IsConnected, 事件               │
 // │ 特性：ServerUrl 为空时完全静默，离线失败不影响本地流程   │
 // └─────────────────────────────────────────────────────────┘
 using System;
 using System.Collections.Generic;
-using System.Drawing;
+using System.Drawing;   
 using System.Drawing.Imaging;
 using System.IO;
 using System.Net.Http;
-using System.Net.WebSockets;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using WebSocketSharp;
 using VisionGuard.Models;
 using VisionGuard.Utils;
 
@@ -49,10 +48,15 @@ namespace VisionGuard.Services
         };
 
         // ── WebSocket ────────────────────────────────────────────────
-        private ClientWebSocket _ws;
+        private WebSocket _ws;
         private CancellationTokenSource _wsCts;
         private Thread _wsThread;
         private bool _wsConnected;
+        private bool _authCompleted;
+
+        // 用于等待认证结果返回
+        private readonly ManualResetEventSlim _authEvent = new ManualResetEventSlim(false);
+        private bool _authSuccess;
 
         private bool _disposed;
 
@@ -175,15 +179,8 @@ namespace VisionGuard.Services
         {
             _configured = false;          // 阻止心跳等后续操作
             _wsCts?.Cancel();             // 通知 WsLoop 退出
-            // 主动关闭 WS，立即中断 ReceiveAsync 阻塞
-            try
-            {
-                if (_ws != null && _ws.State == WebSocketState.Open)
-                    _ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "user disconnect",
-                        CancellationToken.None).Wait(1000);
-            }
-            catch { /* 忽略关闭时异常 */ }
-            SetWsState(false, "disconnected");  // 立即更新 UI，不等后台线程
+            try { _ws?.Close(); } catch { /* 忽略关闭时异常 */ }
+            SetWsState(false, "disconnected");  // 立即更新 UI
         }
 
         public void Dispose()
@@ -192,12 +189,12 @@ namespace VisionGuard.Services
             _disposed = true;
             _wsCts?.Cancel();
             _wsCts?.Dispose();
-            try { _ws?.Abort(); } catch { }
-            _ws?.Dispose();
+            _authEvent.Dispose();
+            try { _ws?.Close(); } catch { }
         }
 
         // ════════════════════════════════════════════════════════════
-        // WebSocket 自动重连循环
+        // WebSocket 自动重连循环（基于 WebSocketSharp 事件驱动）
         // ════════════════════════════════════════════════════════════
 
         private void StartWsLoop()
@@ -220,74 +217,99 @@ namespace VisionGuard.Services
 
             while (!token.IsCancellationRequested)
             {
-                SetWsState(false, "connecting");
+                _authCompleted = false;
+                _authEvent.Reset();
+
+                string wsUrl = _serverUrl
+                    .Replace("https://", "wss://")
+                    .Replace("http://",  "ws://");
+
                 LogManager.StaticInfo($"[Server] WS 连接中 → {_serverUrl} (第{attempt + 1}次)");
 
                 try
                 {
-                    _ws?.Dispose();
-                    _ws = new ClientWebSocket();
+                    SetWsState(false, "connecting");
 
-                    // 将 http:// 换成 ws://，https:// → wss://
-                    string wsUrl = _serverUrl
-                        .Replace("https://", "wss://")
-                        .Replace("http://",  "ws://");
+                    _ws?.Close();
+                    _ws = new WebSocket(wsUrl + "/ws");
 
-                    _ws.ConnectAsync(new Uri(wsUrl + "/ws"), token)
-                       .GetAwaiter().GetResult();
-
-                    // 认证
-                    var authMsg = new Dictionary<string, object>
+                    _ws.OnOpen += (sender, e) =>
                     {
-                        ["type"]       = "auth",
-                        ["apiKey"]     = _apiKey,
-                        ["role"]       = "windows",
-                        ["deviceId"]   = _deviceId,
-                        ["deviceName"] = _deviceName,
+                        // 连接建立，发送认证
+                        var authMsg = new Dictionary<string, object>
+                        {
+                            ["type"]       = "auth",
+                            ["apiKey"]     = _apiKey,
+                            ["role"]       = "windows",
+                            ["deviceId"]   = _deviceId,
+                            ["deviceName"] = _deviceName,
+                        };
+                        _ws.Send(SimpleJson.ToJson(authMsg));
                     };
-                    WsSendJsonSync(_ws, authMsg, token);
 
-                    // 等待 auth-result
-                    string authReply = WsReceiveOneSync(_ws, token);
-                    var authDict = SimpleJson.ParseDict(authReply);
-                    bool success = authDict.TryGetValue("success", out object sv) && sv is bool b && b;
-                    if (!success)
+                    _ws.OnMessage += (sender, e) =>
                     {
-                        string reason = SimpleJson.GetString(authDict, "reason", "unknown");
-                        LogManager.StaticWarn($"[Server] WS 认证失败: {reason}");
+                        HandleWsMessage(e.Data);
+                    };
+
+                    _ws.OnClose += (sender, e) =>
+                    {
+                        if (_disposed) return;
+                        LogManager.StaticInfo($"[Server] WS 连接关闭 (code={e.Code})");
                         SetWsState(false, "disconnected");
-                        // 认证失败退避，避免无限快速重试
-                        token.WaitHandle.WaitOne(TimeSpan.FromSeconds(BackoffSeconds[Math.Min(attempt, BackoffSeconds.Length - 1)]));
+                    };
+
+                    _ws.OnError += (sender, e) =>
+                    {
+                        if (_disposed) return;
+                        string msg = e.Message ?? "unknown";
+                        LogManager.StaticWarn($"[Server] WS 错误: {msg}");
+                        SetWsState(false, "disconnected");
+                    };
+
+                    // 启动连接
+                    _ws.Connect();
+
+                    // 等待认证完成
+                    while (!_authCompleted && !token.IsCancellationRequested)
+                    {
+                        if (_authEvent.Wait(500)) break;
+                    }
+
+                    if (token.IsCancellationRequested) break;
+
+                    if (!_authSuccess)
+                    {
+                        int waitSec = BackoffSeconds[Math.Min(attempt, BackoffSeconds.Length - 1)];
+                        LogManager.StaticInfo($"[Server] {waitSec}s 后重连...");
+                        token.WaitHandle.WaitOne(TimeSpan.FromSeconds(waitSec));
                         attempt++;
                         continue;
                     }
 
                     SetWsState(true, "connected");
-                    attempt = 0;  // 连接成功，重置退避
+                    attempt = 0;
                     LogManager.StaticInfo("[Server] WS 已连接");
 
-                    // 接收消息循环
-                    while (!token.IsCancellationRequested && _ws.State == WebSocketState.Open)
+                    // 保持线程存活直到连接断开或取消
+                    while (!token.IsCancellationRequested && _ws != null && _ws.IsAlive)
                     {
-                        string json = WsReceiveOneSync(_ws, token);
-                        if (json == null) break;  // 连接关闭
-                        HandleWsMessage(json);
+                        if (_authEvent.Wait(500)) { _authEvent.Reset(); _authCompleted = false; }
                     }
                 }
                 catch (OperationCanceledException) { /* 主动取消，正常退出 */ }
                 catch (Exception ex)
                 {
-                    LogManager.StaticWarn($"[Server] WS 断线: {ex.Message}");
-                }
+                    LogManager.StaticWarn($"[Server] WS 异常: {ex.Message}");
+                    SetWsState(false, "disconnected");
 
-                SetWsState(false, "disconnected");  // 无论何种退出原因，都更新状态
-
-                if (!token.IsCancellationRequested)
-                {
-                    int waitSec = BackoffSeconds[Math.Min(attempt, BackoffSeconds.Length - 1)];
-                    LogManager.StaticInfo($"[Server] {waitSec}s 后重连...");
-                    token.WaitHandle.WaitOne(TimeSpan.FromSeconds(waitSec));
-                    attempt++;
+                    if (!token.IsCancellationRequested)
+                    {
+                        int waitSec = BackoffSeconds[Math.Min(attempt, BackoffSeconds.Length - 1)];
+                        LogManager.StaticInfo($"[Server] {waitSec}s 后重连...");
+                        token.WaitHandle.WaitOne(TimeSpan.FromSeconds(waitSec));
+                        attempt++;
+                    }
                 }
             }
         }
@@ -298,6 +320,20 @@ namespace VisionGuard.Services
             {
                 var d = SimpleJson.ParseDict(json);
                 string type = SimpleJson.GetString(d, "type");
+
+                if (type == "auth-result")
+                {
+                    _authSuccess = d.TryGetValue("success", out object sv) && sv is bool b && b;
+                    if (!_authSuccess)
+                    {
+                        string reason = SimpleJson.GetString(d, "reason", "unknown");
+                        LogManager.StaticWarn($"[Server] WS 认证失败: {reason}");
+                        SetWsState(false, "disconnected");
+                    }
+                    _authCompleted = true;
+                    _authEvent.Set();
+                    return;
+                }
 
                 if (type == "command")
                 {
@@ -312,7 +348,6 @@ namespace VisionGuard.Services
                     if (!string.IsNullOrEmpty(key))
                         SetConfigReceived?.Invoke(this, new KeyValuePair<string, string>(key, val));
                 }
-                // auth-result 已在连接阶段消费，此处忽略
             }
             catch { }
         }
@@ -322,7 +357,7 @@ namespace VisionGuard.Services
         /// </summary>
         public void SendCommandAck(string command, bool success, string reason = "")
         {
-            if (!_configured || !_wsConnected) return;
+            if (!_configured || !_wsConnected || _ws == null) return;
             var msg = new Dictionary<string, object>
             {
                 ["type"]    = "command-ack",
@@ -333,45 +368,13 @@ namespace VisionGuard.Services
             WsSendJson(msg);
         }
 
-        // ── WS 辅助 ──────────────────────────────────────────────────
+        // ── WS 辅助 ─────────────────────────────────────────────────
 
         private void WsSendJson(Dictionary<string, object> msg)
         {
-            if (_ws == null || _ws.State != WebSocketState.Open) return;
-            try { WsSendJsonSync(_ws, msg, CancellationToken.None); }
+            if (_ws == null || !_ws.IsAlive) return;
+            try { _ws.Send(SimpleJson.ToJson(msg)); }
             catch { }
-        }
-
-        private static void WsSendJsonSync(ClientWebSocket ws, Dictionary<string, object> msg, CancellationToken token)
-        {
-            byte[] data = Encoding.UTF8.GetBytes(SimpleJson.ToJson(msg));
-            ws.SendAsync(new ArraySegment<byte>(data), WebSocketMessageType.Text, true, token)
-              .GetAwaiter().GetResult();
-        }
-
-        private static string WsReceiveOneSync(ClientWebSocket ws, CancellationToken token)
-        {
-            var buf  = new byte[64 * 1024];
-            var sb   = new StringBuilder();
-
-            while (true)
-            {
-                WebSocketReceiveResult result;
-                try
-                {
-                    result = ws.ReceiveAsync(new ArraySegment<byte>(buf), token)
-                               .GetAwaiter().GetResult();
-                }
-                catch (OperationCanceledException) { throw; }
-                catch { return null; }
-
-                if (result.MessageType == WebSocketMessageType.Close) return null;
-
-                sb.Append(Encoding.UTF8.GetString(buf, 0, result.Count));
-                if (result.EndOfMessage) break;
-            }
-
-            return sb.ToString();
         }
 
         private void SetWsState(bool connected, string stateName)

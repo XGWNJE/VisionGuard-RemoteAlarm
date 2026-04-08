@@ -31,6 +31,9 @@ namespace VisionGuard.UI
         /// <summary>显示在按钮上方的图标字符（如 emoji 或符号字符）</summary>
         public string IconText { get; set; } = "";
 
+        /// <summary>图标图片（优先于 IconText）</summary>
+        public Image IconImage { get; set; }
+
         /// <summary>是否处于选中状态</summary>
         public bool IsSelected
         {
@@ -74,7 +77,15 @@ namespace VisionGuard.UI
             Color fg = _isSelected ? FgSelected : FgNormal;
 
             // 图标（上半部分）
-            if (!string.IsNullOrEmpty(IconText))
+            if (IconImage != null)
+            {
+                // 绘制图片图标，居中，保留上下边距
+                float imgSize = Math.Min(Width - 16, Height * 0.50f);
+                float imgX = (Width - imgSize) / 2;
+                float imgY = 4;
+                g.DrawImage(IconImage, new RectangleF(imgX, imgY, imgSize, imgSize));
+            }
+            else if (!string.IsNullOrEmpty(IconText))
             {
                 using (var iconFont = new Font("Segoe UI Emoji", Font.Size + 2, FontStyle.Regular, GraphicsUnit.Point))
                 using (var brush = new SolidBrush(fg))

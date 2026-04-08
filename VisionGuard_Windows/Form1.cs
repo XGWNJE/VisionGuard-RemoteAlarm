@@ -916,10 +916,17 @@ namespace VisionGuard
                 BackColor = Color.FromArgb(30, 30, 30)
             };
 
-            _menuCapture = new MenuButton { Text = "捕获", IconText = "\U0001F4F7", Dock = DockStyle.Top };
-            _menuParams  = new MenuButton { Text = "参数", IconText = "\u2699",     Dock = DockStyle.Top };
-            _menuTargets = new MenuButton { Text = "目标", IconText = "\U0001F3AF", Dock = DockStyle.Top };
-            _menuServer  = new MenuButton { Text = "服务器", IconText = "\U0001F310", Dock = DockStyle.Top };
+            // 加载菜单图标
+            var assetPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Assets");
+            var imgCapture  = Image.FromFile(Path.Combine(assetPath, "信号捕获.png"));
+            var imgParams   = Image.FromFile(Path.Combine(assetPath, "参数.png"));
+            var imgTargets  = Image.FromFile(Path.Combine(assetPath, "目标-F.png"));
+            var imgServer   = Image.FromFile(Path.Combine(assetPath, "服务器.png"));
+
+            _menuCapture = new MenuButton { Text = "捕获", IconImage = imgCapture, Dock = DockStyle.Top };
+            _menuParams  = new MenuButton { Text = "参数", IconImage = imgParams,  Dock = DockStyle.Top };
+            _menuTargets = new MenuButton { Text = "目标", IconImage = imgTargets, Dock = DockStyle.Top };
+            _menuServer  = new MenuButton { Text = "服务器", IconImage = imgServer, Dock = DockStyle.Top };
             _allMenuButtons = new[] { _menuCapture, _menuParams, _menuTargets, _menuServer };
 
             // 注意：Dock.Top 按添加顺序从上到下排列，需要反序添加

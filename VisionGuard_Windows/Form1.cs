@@ -346,7 +346,7 @@ namespace VisionGuard
             _monitorService.Stop();
             // 不停止心跳定时器：服务器依赖心跳判断在线状态，停止心跳会导致 Android 误报掉线
             // isMonitoring=false 通过下次 tick 自动传递，同时立即发一次最终状态
-            _serverPushService.SendHeartbeat(isMonitoring: false, isAlarming: false, isReady: _monitorService.IsReady,
+            _serverPushService.SendHeartbeat(isMonitoring: false, isAlarming: false, isReady: IsRegionReady,
                 cooldown: ParseInt(_txtCooldown.Text, 1, 300, 5),
                 confidence: _trkThreshold.Value / 100f,
                 targets: string.Join(",", _classPicker.SelectedClasses));
@@ -524,7 +524,7 @@ namespace VisionGuard
                 _serverPushService.SendHeartbeat(
                     isMonitoring: _monitorService.IsStarted,
                     isAlarming:   _alertService.IsAlarming,
-                    isReady:       _monitorService.IsReady,
+                    isReady:       IsRegionReady,
                     cooldown:      ParseInt(_txtCooldown.Text, 1, 300, 5),
                     confidence:    _trkThreshold.Value / 100f,
                     targets:       string.Join(",", _classPicker.SelectedClasses));
@@ -790,15 +790,30 @@ namespace VisionGuard
             };
             var menu = new ContextMenu(new[]
             {
-                new MenuItem("显示主窗口", (s, ev) => { Show(); WindowState = FormWindowState.Normal; }),
+                new MenuItem("显示主窗口", (s, ev) => { Show(); WindowState = FormWindowState.Normal; Activate(); }),
                 new MenuItem("退出",        (s, ev) => Application.Exit())
             });
             _notifyIcon.ContextMenu = menu;
-            _notifyIcon.DoubleClick += (s, ev) => { Show(); WindowState = FormWindowState.Normal; };
+            _notifyIcon.DoubleClick += (s, ev) => { Show(); WindowState = FormWindowState.Normal; Activate(); };
+
+            // 最小化时隐藏到托盘，不在任务栏占位
+            Resize += (s, ev) =>
+            {
+                if (WindowState == FormWindowState.Minimized)
+                    Hide();
+            };
         }
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
+            // 用户点击 × 时隐藏到托盘，不退出；托盘菜单"退出"才真正关闭
+            if (e.CloseReason == CloseReason.UserClosing)
+            {
+                e.Cancel = true;
+                Hide();
+                return;
+            }
+
             SaveSettings();
             _heartbeatTimer?.Stop();
             _heartbeatTimer?.Dispose();
@@ -840,6 +855,7 @@ namespace VisionGuard
             FormBorderStyle = FormBorderStyle.FixedSingle;
             MaximizeBox     = false;
             StartPosition   = FormStartPosition.CenterScreen;
+            ShowInTaskbar   = false;   // 始终不显示任务栏按钮，靠托盘图标操作
             BackColor       = Color.FromArgb(25, 25, 25);
             ForeColor       = Color.LightGray;
             Font = new Font("Segoe UI", 9f, FontStyle.Regular, GraphicsUnit.Point);
@@ -1136,9 +1152,7 @@ namespace VisionGuard
             {
                 string name     = _txtDeviceName.Text.Trim();
                 string deviceId = EnsureDeviceId();
-                _serverPushService.Dispose();
-                _serverPushService = new ServerPushService();
-                WireServerPushEvents();
+                _serverPushService.Disconnect();
                 _serverPushService.Configure(ServerUrl, ServerApiKey, deviceId, name);
                 _log.Info("[Server] 手动重试连接…");
             };
@@ -1150,9 +1164,7 @@ namespace VisionGuard
                 SettingsStore.Set("DeviceName", name);
                 SettingsStore.Save();
                 string deviceId = EnsureDeviceId();
-                _serverPushService.Dispose();
-                _serverPushService = new ServerPushService();
-                WireServerPushEvents();
+                _serverPushService.Disconnect();
                 _serverPushService.Configure(ServerUrl, ServerApiKey, deviceId, name);
                 _log.Info($"[Server] 设备名已更新为「{name}」，重新连接中…");
             };
@@ -1190,6 +1202,19 @@ namespace VisionGuard
         // ════════════════════════════════════════════════════════════
         // 辅助方法
         // ════════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// 捕获选区是否已设定（不依赖 MonitorService.IsReady，
+        /// MonitorService 启动前 _config 为 null 会导致 IsReady 始终 false）。
+        /// </summary>
+        private bool IsRegionReady
+        {
+            get
+            {
+                if (_targetWindow != null) return true;                          // 窗口捕获模式
+                return _screenRegion.Width >= 32 && _screenRegion.Height >= 32; // 屏幕区域模式
+            }
+        }
 
         private void ApplySplitterRatio()
         {

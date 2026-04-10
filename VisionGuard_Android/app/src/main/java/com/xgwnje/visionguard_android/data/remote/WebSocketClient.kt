@@ -81,6 +81,9 @@ class WebSocketClient {
     private var connectJob: Job? = null
     private var shouldReconnect = false
 
+    // 最后收到任意消息的时间戳（用于幽灵连接检测）
+    @Volatile private var _lastMessageAt = 0L
+
     // ── 公开 API ──────────────────────────────────────────────
 
     fun connect(serverUrl: String, apiKey: String, deviceId: String) {
@@ -143,8 +146,8 @@ class WebSocketClient {
                     }
 
                     override fun onMessage(ws: WebSocket, text: String) {
+                        _lastMessageAt = System.currentTimeMillis()
                         handleMessage(text)
-                        if (!connectedSuccessfully) connectedSuccessfully = true
                     }
 
                     override fun onFailure(ws: WebSocket, t: Throwable, response: Response?) {
@@ -176,13 +179,21 @@ class WebSocketClient {
                     delay(waitSec * 1000)
                     attempt++
                 } else {
-                    // 已连接，等待它关闭（状态变为 DISCONNECTED）
+                    // 已连接，每 15s 检查一次：连接是否仍有消息流动
+                    _lastMessageAt = System.currentTimeMillis()  // 重置计时
                     while (_connectionState.value == WsState.CONNECTED && shouldReconnect) {
-                        delay(500)
+                        delay(15_000)
+                        val silentMs = System.currentTimeMillis() - _lastMessageAt
+                        if (silentMs > 90_000) {
+                            // 超过 90s 无任何消息：幽灵连接，主动断开重连
+                            Log.w(TAG, "WS 超过 90s 无消息 (沉默 ${silentMs / 1000}s)，主动重连")
+                            ws?.cancel()
+                            _connectionState.value = WsState.DISCONNECTED
+                            break
+                        }
                     }
                     if (shouldReconnect) {
-                        val waitSec = BACKOFF_SECONDS[0]
-                        delay(waitSec * 1000)
+                        delay(BACKOFF_SECONDS[0] * 1000)
                         attempt = 0  // 曾经连接成功，退避归零
                     }
                 }
@@ -195,7 +206,9 @@ class WebSocketClient {
     private fun handleMessage(text: String) {
         try {
             val obj: JsonObject = JsonParser.parseString(text).asJsonObject
-            when (val type = obj.get("type")?.asString ?: "") {
+            val type = obj.get("type")?.asString ?: ""
+            Log.v(TAG, "WS 收到: $type")
+            when (type) {
                 "auth-result" -> {
                     val success = obj.get("success")?.asBoolean ?: false
                     if (success) {

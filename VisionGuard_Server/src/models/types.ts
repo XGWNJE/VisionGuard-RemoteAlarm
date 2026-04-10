@@ -183,4 +183,5 @@ export interface WindowsClient {
 export interface AndroidClient {
   ws: WebSocket;
   deviceId: string;
+  lastSeen: Date;
 }

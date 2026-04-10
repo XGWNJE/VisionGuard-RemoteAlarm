@@ -27,9 +27,12 @@ VisionGuard_Android/.idea/
 VisionGuard_Android/local.properties
 VisionGuard_Android/build/
 VisionGuard_Android/app/build/
+VisionGuard_Android/app/release/
 VisionGuard_Android/captures/
 VisionGuard_Android/.externalNativeBuild/
 VisionGuard_Android/.cxx/
+VisionGuard_Android/key/
+VisionGuard_Android/VisionGuard_Android
 
 # ===== 通用 =====
 .DS_Store

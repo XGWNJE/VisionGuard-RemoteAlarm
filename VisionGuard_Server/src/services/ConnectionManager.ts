@@ -150,7 +150,12 @@ function handleAuth(
     });
     console.log(`[ws] Windows 设备上线: ${msg.deviceName} (${msg.deviceId})`);
   } else if (msg.role === 'android') {
-    androidClients.set(msg.deviceId, { ws, deviceId: msg.deviceId });
+    androidClients.set(msg.deviceId, { ws, deviceId: msg.deviceId, lastSeen: new Date() });
+    // 监听 OkHttp ping 帧（每 25s 一次），更新存活时间
+    ws.on('ping', () => {
+      const client = androidClients.get(msg.deviceId);
+      if (client) client.lastSeen = new Date();
+    });
     console.log(`[ws] Android 设备上线: ${msg.deviceId}`);
   } else {
     sendJson(ws, { type: 'auth-result', success: false, reason: 'invalid role' });
@@ -326,3 +331,15 @@ function sendJson(ws: WebSocket, obj: object): void {
     ws.send(JSON.stringify(obj));
   }
 }
+
+// ── Android 存活检测：每 60s 清理超过 90s 无 ping 的幽灵连接 ──
+setInterval(() => {
+  const deadline = Date.now() - 90_000;
+  for (const [id, client] of androidClients) {
+    if (client.lastSeen.getTime() < deadline) {
+      console.log(`[ws] Android 心跳超时，强制关闭: ${id} (最后活跃 ${Math.round((Date.now() - client.lastSeen.getTime()) / 1000)}s 前)`);
+      client.ws.terminate();
+      androidClients.delete(id);
+    }
+  }
+}, 60_000);

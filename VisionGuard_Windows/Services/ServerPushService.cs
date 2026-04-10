@@ -53,6 +53,7 @@ namespace VisionGuard.Services
         private Thread _wsThread;
         private bool _wsConnected;
         private bool _authCompleted;
+        private readonly object _sendLock = new object();
 
         // 用于等待认证结果返回
         private readonly ManualResetEventSlim _authEvent = new ManualResetEventSlim(false);
@@ -283,7 +284,11 @@ namespace VisionGuard.Services
                     {
                         if (_disposed) return;
                         string msg = e.Message ?? "unknown";
-                        LogManager.StaticWarn($"[Server] WS 错误: {msg}");
+                        // 连接已断开时的 OnError 是正常重连流程，降级为 Info
+                        if (msg.Contains("isn't established") || msg.Contains("has been closed"))
+                            LogManager.StaticInfo($"[Server] WS 连接已断开，将自动重连");
+                        else
+                            LogManager.StaticWarn($"[Server] WS 错误: {msg}");
                         SetWsState(false, "disconnected");
                     };
 
@@ -293,7 +298,9 @@ namespace VisionGuard.Services
                     // 等待认证完成
                     while (!_authCompleted && !token.IsCancellationRequested)
                     {
-                        if (_authEvent.Wait(500)) break;
+                        if (_disposed) return;
+                        try { if (_authEvent.Wait(500)) break; }
+                        catch (ObjectDisposedException) { return; }
                     }
 
                     if (token.IsCancellationRequested) break;
@@ -314,7 +321,9 @@ namespace VisionGuard.Services
                     // 保持线程存活直到连接断开或取消
                     while (!token.IsCancellationRequested && _ws != null && _ws.IsAlive)
                     {
-                        if (_authEvent.Wait(500)) { _authEvent.Reset(); _authCompleted = false; }
+                        if (_disposed) break;
+                        try { if (_authEvent.Wait(500)) { _authEvent.Reset(); _authCompleted = false; } }
+                        catch (ObjectDisposedException) { break; }
                     }
                 }
                 catch (OperationCanceledException) { /* 主动取消，正常退出 */ }
@@ -398,13 +407,17 @@ namespace VisionGuard.Services
 
         private void WsSendJson(Dictionary<string, object> msg)
         {
-            if (_ws == null || !_ws.IsAlive) return;
-            try { _ws.Send(SimpleJson.ToJson(msg)); }
-            catch { }
+            lock (_sendLock)
+            {
+                if (_ws == null || !_ws.IsAlive) return;
+                try { _ws.Send(SimpleJson.ToJson(msg)); }
+                catch { }
+            }
         }
 
         private void SetWsState(bool connected, string stateName)
         {
+            if (_wsConnected == connected) return; // 状态未变，跳过（避免 OnError+OnClose 重复触发）
             _wsConnected = connected;
             try { ConnectionStateChanged?.Invoke(this, stateName); }
             catch { }

@@ -12,6 +12,16 @@ data class DeviceInfo(
     val online: Boolean,
     val isMonitoring: Boolean,
     val isAlarming: Boolean,
-    val isReady: Boolean,           // 选区是否已设定
-    val lastSeen: String            // ISO 8601
+    val isReady: Boolean,
+    val lastSeen: String,
+    val cooldown: Int = 5,
+    val confidence: Double = 0.45,
+    val targets: String = ""
+)
+
+/** 记录每台设备最后下发的参数配置（Android 端本地缓存） */
+data class DeviceConfig(
+    val cooldown: Int = 5,           // 秒
+    val confidence: Double = 0.45,   // 0.10–0.95
+    val targets: String = ""         // 英文逗号分隔，如 "person,car"
 )

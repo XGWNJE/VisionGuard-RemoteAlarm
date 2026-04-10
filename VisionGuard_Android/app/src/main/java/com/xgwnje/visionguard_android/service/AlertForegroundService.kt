@@ -21,15 +21,19 @@ import com.xgwnje.visionguard_android.AppConstants
 import com.xgwnje.visionguard_android.data.model.AlertMessage
 import com.xgwnje.visionguard_android.data.model.DeviceInfo
 import com.xgwnje.visionguard_android.data.model.ScreenshotData
+import com.xgwnje.visionguard_android.data.cache.ScreenshotCache
+import com.xgwnje.visionguard_android.data.model.DeviceConfig
 import com.xgwnje.visionguard_android.data.remote.WebSocketClient
 import com.xgwnje.visionguard_android.data.remote.WsState
 import com.xgwnje.visionguard_android.data.repository.SettingsRepository
 import com.xgwnje.visionguard_android.util.NotificationHelper
+import android.util.Base64
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import java.io.File
 import java.util.concurrent.atomic.AtomicInteger
 
 private const val TAG = "VG_FgService"
@@ -61,9 +65,14 @@ class AlertForegroundService : LifecycleService() {
     private lateinit var nm: NotificationManager
     private val notifIdCounter = AtomicInteger(1000)
     private var wakeLock: PowerManager.WakeLock? = null
+    private lateinit var screenshotCache: ScreenshotCache
 
-    // ── 截图按需请求（透传 wsClient）────────────────────────
-    val onScreenshotData: SharedFlow<ScreenshotData> = wsClient.onScreenshotData
+    // ── 设备参数缓存（记录每台设备最后下发的值）──────────────
+    private val deviceConfigs = mutableMapOf<String, DeviceConfig>()
+
+    // ── 截图数据（拦截缓存后转发）────────────────────────────
+    private val _onScreenshotData = MutableSharedFlow<ScreenshotData>(extraBufferCapacity = 8)
+    val onScreenshotData: SharedFlow<ScreenshotData> = _onScreenshotData
 
     fun requestScreenshot(alertId: String, deviceId: String): Boolean =
         wsClient.requestScreenshot(alertId, deviceId)
@@ -75,6 +84,7 @@ class AlertForegroundService : LifecycleService() {
         nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         NotificationHelper.createChannels(this)
         settingsRepo = SettingsRepository(applicationContext)
+        screenshotCache = ScreenshotCache(applicationContext)
 
         // 启动前台通知
         startForeground(
@@ -129,6 +139,17 @@ class AlertForegroundService : LifecycleService() {
             }
         }
 
+        // 订阅截图数据：缓存到磁盘后转发给 UI
+        lifecycleScope.launch {
+            wsClient.onScreenshotData.collect { data ->
+                try {
+                    val bytes = Base64.decode(data.imageBase64, Base64.DEFAULT)
+                    screenshotCache.save(data.alertId, bytes)
+                } catch (_: Exception) { }
+                _onScreenshotData.emit(data)
+            }
+        }
+
         // 读取持久化 deviceId 后连接（使用硬编码的 URL 和 Key）
         lifecycleScope.launch {
             val deviceId = settingsRepo.ensureDeviceId()
@@ -168,7 +189,18 @@ class AlertForegroundService : LifecycleService() {
 
     fun sendSetConfig(targetDeviceId: String, key: String, value: String) {
         wsClient.sendSetConfig(targetDeviceId, key, value)
+        // 同步更新本地参数缓存
+        val current = deviceConfigs.getOrPut(targetDeviceId) { DeviceConfig() }
+        deviceConfigs[targetDeviceId] = when (key) {
+            "cooldown" -> current.copy(cooldown = value.toIntOrNull() ?: current.cooldown)
+            "confidence" -> current.copy(confidence = value.toDoubleOrNull() ?: current.confidence)
+            "targets" -> current.copy(targets = value)
+            else -> current
+        }
     }
+
+    /** 查询设备最后下发的参数配置 */
+    fun getDeviceConfig(deviceId: String): DeviceConfig? = deviceConfigs[deviceId]
 
     /** 手动重试连接（UI 重试按钮调用） */
     fun reconnect() {
@@ -180,7 +212,11 @@ class AlertForegroundService : LifecycleService() {
 
     fun clearAlerts() {
         _alerts.value = emptyList()
+        screenshotCache.clearAll()
     }
+
+    /** 查询截图缓存文件，未缓存返回 null */
+    fun getScreenshotFile(alertId: String): File? = screenshotCache.getFile(alertId)
 
     // ── 通知发送 ──────────────────────────────────────────────
 

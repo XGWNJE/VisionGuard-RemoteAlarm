@@ -68,7 +68,10 @@ export interface WsHeartbeat {
   deviceId: string;
   isMonitoring: boolean;
   isAlarming: boolean;
-  isReady: boolean;   // 选区是否已设定
+  isReady: boolean;
+  cooldown?: number;
+  confidence?: number;
+  targets?: string;
 }
 
 /** 服务器 → Android：报警推送 */
@@ -94,8 +97,11 @@ export interface DeviceStatus {
   online: boolean;
   isMonitoring: boolean;
   isAlarming: boolean;
-  isReady: boolean;           // 选区是否已设定
-  lastSeen: string;           // ISO 8601
+  isReady: boolean;
+  lastSeen: string;
+  cooldown: number;
+  confidence: number;
+  targets: string;
 }
 
 /** Android → 服务器：反向控制命令 */
@@ -169,6 +175,9 @@ export interface WindowsClient {
   isAlarming: boolean;
   isReady: boolean;
   lastSeen: Date;
+  cooldown: number;
+  confidence: number;
+  targets: string;
 }
 
 export interface AndroidClient {

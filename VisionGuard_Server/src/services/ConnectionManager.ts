@@ -144,6 +144,9 @@ function handleAuth(
       isAlarming: false,
       isReady: false,
       lastSeen: new Date(),
+      cooldown: 5,
+      confidence: 0.45,
+      targets: '',
     });
     console.log(`[ws] Windows 设备上线: ${msg.deviceName} (${msg.deviceId})`);
   } else if (msg.role === 'android') {
@@ -174,11 +177,17 @@ function handleHeartbeat(msg: WsHeartbeat): void {
   const changed =
     client.isMonitoring !== msg.isMonitoring ||
     client.isAlarming !== msg.isAlarming ||
-    client.isReady !== msg.isReady;
+    client.isReady !== msg.isReady ||
+    client.cooldown !== (msg.cooldown ?? client.cooldown) ||
+    client.confidence !== (msg.confidence ?? client.confidence) ||
+    client.targets !== (msg.targets ?? client.targets);
 
   client.isMonitoring = msg.isMonitoring;
   client.isAlarming = msg.isAlarming;
   client.isReady = msg.isReady ?? false;
+  if (msg.cooldown !== undefined) client.cooldown = msg.cooldown;
+  if (msg.confidence !== undefined) client.confidence = msg.confidence;
+  if (msg.targets !== undefined) client.targets = msg.targets;
   client.lastSeen = new Date();
 
   if (changed) broadcastDeviceList();
@@ -304,6 +313,9 @@ function buildDeviceList(): DeviceStatus[] {
       isAlarming: c.isAlarming,
       isReady: c.isReady,
       lastSeen: c.lastSeen.toISOString(),
+      cooldown: c.cooldown,
+      confidence: c.confidence,
+      targets: c.targets,
     });
   }
   return devices;

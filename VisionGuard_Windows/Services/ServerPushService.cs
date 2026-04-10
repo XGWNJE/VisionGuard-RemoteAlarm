@@ -174,7 +174,8 @@ namespace VisionGuard.Services
         }
 
         /// <summary>发送心跳（5秒定时器调用）</summary>
-        public void SendHeartbeat(bool isMonitoring, bool isAlarming, bool isReady)
+        public void SendHeartbeat(bool isMonitoring, bool isAlarming, bool isReady,
+            int cooldown, float confidence, string targets)
         {
             if (!_configured || !_wsConnected || _ws == null) return;
 
@@ -185,6 +186,9 @@ namespace VisionGuard.Services
                 ["isMonitoring"] = isMonitoring,
                 ["isAlarming"]  = isAlarming,
                 ["isReady"]     = isReady,
+                ["cooldown"]    = cooldown,
+                ["confidence"]  = confidence,
+                ["targets"]     = targets,
             };
             WsSendJson(msg);
         }

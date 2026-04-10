@@ -48,7 +48,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.xgwnje.visionguard_android.data.model.cocoLabelZh
 import com.xgwnje.visionguard_android.service.AlertForegroundService
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -63,20 +65,32 @@ fun AlertDetailScreen(
     var screenshotBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var screenshotFailed by remember { mutableStateOf(false) }
 
-    // 进入页面时请求截图（按需拉取，不走 VPS HTTP）
+    // 进入页面时：优先从缓存加载，缓存未命中再请求截图
     LaunchedEffect(alertId) {
-        if (alert != null) {
-            val sent = service.requestScreenshot(alertId, alert.deviceId)
-            if (!sent) {
-                // WS 未连接，立即标记失败
-                screenshotFailed = true
+        if (alert == null) return@LaunchedEffect
+
+        // 先查本地缓存
+        val cachedFile = service.getScreenshotFile(alertId)
+        if (cachedFile != null && cachedFile.exists()) {
+            val bitmap = withContext(Dispatchers.IO) {
+                BitmapFactory.decodeFile(cachedFile.absolutePath)
+            }
+            if (bitmap != null) {
+                screenshotBitmap = bitmap
                 return@LaunchedEffect
             }
-            // 等待截图数据，10 秒超时
-            delay(10_000)
-            if (screenshotBitmap == null) {
-                screenshotFailed = true
-            }
+        }
+
+        // 缓存未命中，走网络请求
+        val sent = service.requestScreenshot(alertId, alert.deviceId)
+        if (!sent) {
+            screenshotFailed = true
+            return@LaunchedEffect
+        }
+        // 等待截图数据，10 秒超时
+        delay(10_000)
+        if (screenshotBitmap == null) {
+            screenshotFailed = true
         }
     }
 

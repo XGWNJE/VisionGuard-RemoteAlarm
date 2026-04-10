@@ -88,5 +88,13 @@ private val enZhMap = mapOf(
     "toothbrush" to "牙刷"
 )
 
+private val zhEnMap = enZhMap.entries.associate { it.value to it.key }
+
 /** 将 COCO 类英文名翻译为中文，未知类名返回原文 */
 fun cocoLabelZh(label: String): String = enZhMap[label] ?: label
+
+/** 中文→英文反查，未知中文返回原文 */
+fun cocoLabelEn(zhLabel: String): String = zhEnMap[zhLabel] ?: zhLabel
+
+/** 完整的英中对照列表，供标签选择器使用 */
+val cocoEnZhPairs: List<Pair<String, String>> = enZhMap.entries.map { it.key to it.value }

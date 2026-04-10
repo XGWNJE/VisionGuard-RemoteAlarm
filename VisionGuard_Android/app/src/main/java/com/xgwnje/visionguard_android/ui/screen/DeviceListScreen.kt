@@ -29,6 +29,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.xgwnje.visionguard_android.data.model.DeviceConfig
 import com.xgwnje.visionguard_android.data.remote.WsState
 import com.xgwnje.visionguard_android.service.AlertForegroundService
 import com.xgwnje.visionguard_android.ui.component.ConnectionBanner
@@ -97,6 +98,11 @@ fun DeviceListScreen(
                     items(devices, key = { it.deviceId }) { device ->
                         DeviceCard(
                             device = device,
+                            initialConfig = DeviceConfig(
+                                cooldown = device.cooldown,
+                                confidence = device.confidence,
+                                targets = device.targets
+                            ),
                             onCommand = { command ->
                                 deviceVm.sendCommand(device.deviceId, command)
                             },

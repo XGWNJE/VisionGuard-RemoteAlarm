@@ -85,6 +85,7 @@ fun AlertListScreen(
                     ) { alert ->
                         AlertCard(
                             alert = alert,
+                            thumbnailFile = service.getScreenshotFile(alert.alertId),
                             onClick = { onAlertClick(alert.alertId) }
                         )
                     }

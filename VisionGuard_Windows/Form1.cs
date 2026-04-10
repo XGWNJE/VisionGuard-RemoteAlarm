@@ -315,17 +315,7 @@ namespace VisionGuard
                     _log.Info("[Server] 收到 resume，监控推理已启动。");
                 }
 
-                // 启动心跳定时器（5秒）
-                if (_heartbeatTimer == null)
-                {
-                    _heartbeatTimer = new System.Windows.Forms.Timer { Interval = 5000 };
-                    _heartbeatTimer.Tick += (s, ev) =>
-                        _serverPushService.SendHeartbeat(
-                            isMonitoring: _monitorService.IsStarted,
-                            isAlarming:   _alertService.IsAlarming,
-                            isReady:       _monitorService.IsReady);
-                }
-                _heartbeatTimer.Start();
+                _heartbeatTimer?.Start(); // 定时器已在 LoadSettings 创建，此处确保运行中
             }
             catch (Exception ex)
             {
@@ -356,7 +346,10 @@ namespace VisionGuard
             _monitorService.Stop();
             // 不停止心跳定时器：服务器依赖心跳判断在线状态，停止心跳会导致 Android 误报掉线
             // isMonitoring=false 通过下次 tick 自动传递，同时立即发一次最终状态
-            _serverPushService.SendHeartbeat(isMonitoring: false, isAlarming: false, isReady: _monitorService.IsReady);
+            _serverPushService.SendHeartbeat(isMonitoring: false, isAlarming: false, isReady: _monitorService.IsReady,
+                cooldown: ParseInt(_txtCooldown.Text, 1, 300, 5),
+                confidence: _trkThreshold.Value / 100f,
+                targets: string.Join(",", _classPicker.SelectedClasses));
             UpdateControlState(started: false);
             _log.Info(remote ? "[Server] 收到 pause，监控推理已停止。" : "监控已停止。");
             if (remote) _serverPushService.SendCommandAck("pause", true);
@@ -523,6 +516,19 @@ namespace VisionGuard
                     _txtDeviceName.Text.Trim());
                 _log.Info("[Server] 自动连接中…");
             }
+
+            // 启动心跳定时器（5秒）—— 连接建立后立即开始，无论监控是否运行
+            // SendHeartbeat 内部有 _wsConnected 守卫，未连接时自动跳过
+            _heartbeatTimer = new System.Windows.Forms.Timer { Interval = 5000 };
+            _heartbeatTimer.Tick += (s, ev) =>
+                _serverPushService.SendHeartbeat(
+                    isMonitoring: _monitorService.IsStarted,
+                    isAlarming:   _alertService.IsAlarming,
+                    isReady:       _monitorService.IsReady,
+                    cooldown:      ParseInt(_txtCooldown.Text, 1, 300, 5),
+                    confidence:    _trkThreshold.Value / 100f,
+                    targets:       string.Join(",", _classPicker.SelectedClasses));
+            _heartbeatTimer.Start();
         }
 
         private void SaveSettings()
@@ -1051,113 +1057,84 @@ namespace VisionGuard
         private void BuildServerPage()
         {
             const int PadX = 12;
-            const int LblW = 90;
-            const int TbW  = 220;
-            const int RowH = 22;
-            int y = 12;
+            int fh = Font.Height;
+            int y  = 12;
 
-            _pageServer.Controls.Add(MakeTitle("服务器连接", PadX, ref y, Font.Height));
+            // ── 服务器连接 ──────────────────────────────────────────────
+            _pageServer.Controls.Add(MakeTitle("服务器连接", PadX, ref y, fh));
 
-            // ── 连接状态（主标签）───────────────────────────────────
+            // 状态指示 — 左
             _lblConnState = new Label
             {
-                Text = "● 未连接", Left = PadX, Top = y, AutoSize = true,
+                Text      = "● 未连接",
+                Left      = PadX,
+                Top       = y + 2,          // 光学对齐按钮中心
+                AutoSize  = true,
                 ForeColor = Color.Gray,
-                Font = new Font(Font, FontStyle.Bold),
+                Font      = new Font(Font, FontStyle.Bold),
             };
             _pageServer.Controls.Add(_lblConnState);
-            y += 24;
 
-            // ── 详细状态说明（次标签）───────────────────────────────
-            _lblConnDetail = new Label
-            {
-                Text = "启动后自动连接，请稍候…",
-                Left = PadX, Top = y,
-                Width = _pageServer.ClientSize.Width - PadX * 2,
-                Height = Font.Height + 4,
-                ForeColor = Color.DimGray,
-                AutoSize = false,
-            };
-            _pageServer.Controls.Add(_lblConnDetail);
-            y += 26;
-
-            // ── 服务器信息（只读展示）───────────────────────────────
-            // ── 手动重试 按钮 ────────────────────────────────────────
+            // 重试按钮 — 右，同行
             _btnRetry = new FlatRoundButton
             {
-                Text = "重试连接", Left = PadX, Top = y, Width = 100, Height = 28,
+                Text   = "重试连接",
+                Left   = _pageServer.ClientSize.Width - PadX - 100,
+                Top    = y,
+                Width  = 100,
+                Height = 28,
             };
             _pageServer.Controls.Add(_btnRetry);
-            y += 36;
+            y += 44;   // 28px 按钮 + 16px 间距
 
-            // ── 分割线（用 Label 模拟）───────────────────────────────
+            // 分割线
             _pageServer.Controls.Add(new Label
             {
-                Text = "", Left = PadX, Top = y,
-                Width = _pageServer.ClientSize.Width - PadX * 2,
-                Height = 1,
-                BorderStyle = BorderStyle.FixedSingle,
-                ForeColor = Color.FromArgb(60, 60, 60),
+                Text      = "",
+                Left      = PadX,
+                Top       = y,
+                Width     = _pageServer.ClientSize.Width - PadX * 2,
+                Height    = 1,
                 BackColor = Color.FromArgb(60, 60, 60),
             });
-            y += 12;
+            y += 17;   // 1px 线 + 16px 间距
 
-            // ── 设备名称（唯一可编辑项）─────────────────────────────
-            _pageServer.Controls.Add(new Label
-            {
-                Text = "设备名称：", Left = PadX, Top = y + 3,
-                Width = LblW - 2, Height = Font.Height + 4,
-                ForeColor = Color.LightGray, AutoSize = false
-            });
+            // ── 设备名称 ────────────────────────────────────────────────
+            _pageServer.Controls.Add(MakeTitle("设备名称", PadX, ref y, fh));
+
+            
+
             _txtDeviceName = new TextBox
             {
-                Left = PadX + LblW, Top = y,
-                Width = TbW, Height = RowH,
-                Text = Environment.MachineName,
-                BackColor = Color.FromArgb(50, 50, 50),
-                ForeColor = Color.White,
+                Left        = PadX,
+                Top         = y,
+                Width       = 180,
+                Height      = 22,
+                Text        = Environment.MachineName,
+                BackColor   = Color.FromArgb(50, 50, 50),
+                ForeColor   = Color.White,
                 BorderStyle = BorderStyle.FixedSingle,
             };
             _pageServer.Controls.Add(_txtDeviceName);
-            y += RowH + 6;
 
-            _pageServer.Controls.Add(new Label
-            {
-                Text = "设备名在 Android 端设备列表中显示，修改后重新连接生效。",
-                Left = PadX, Top = y,
-                Width = _pageServer.ClientSize.Width - PadX * 2,
-                Height = Font.Height + 4,
-                ForeColor = Color.DimGray,
-                AutoSize = false,
-            });
-            y += 24;
-
-            // ── 应用设备名 按钮 ──────────────────────────────────────
             var btnApplyName = new FlatRoundButton
             {
-                Text = "应用设备名", Left = PadX, Top = y, Width = 100, Height = 26,
+                Text   = "应用",
+                Left   = PadX + 180 + 8,
+                Top    = y ,
+                Width  = 72,
+                Height = 26,
             };
             _pageServer.Controls.Add(btnApplyName);
-            y += 36;
 
-            // ── 故障排查说明 ─────────────────────────────────────────
-            _pageServer.Controls.Add(new Label
-            {
-                Text = "排查建议：\r\n" +
-                       "• 未连接 → 检查网络，或点「重试连接」\r\n" +
-                       "• 长时间连接中 → 确认服务器网络可访问\r\n" +
-                       "• 认证失败 → API Key 已更新，需重新打包程序",
-                Left = PadX, Top = y,
-                Width = _pageServer.ClientSize.Width - PadX * 2,
-                Height = 76,
-                ForeColor = Color.FromArgb(100, 100, 100),
-                AutoSize = false,
-            });
+            // ── 隐藏字段（WireServerPushEvents 仍赋值，不可删）──────────
+            _lblConnDetail = new Label { Visible = false };
+            _pageServer.Controls.Add(_lblConnDetail);
 
-            // ── 按钮事件 ────────────────────────────────────────────
+            // ── 按钮事件 ────────────────────────────────────────────────
             _btnRetry.Click += (s, e) =>
             {
-                string name = _txtDeviceName.Text.Trim();
+                string name     = _txtDeviceName.Text.Trim();
                 string deviceId = EnsureDeviceId();
                 _serverPushService.Dispose();
                 _serverPushService = new ServerPushService();
@@ -1172,7 +1149,6 @@ namespace VisionGuard
                 if (string.IsNullOrEmpty(name)) { _log.Warn("设备名不能为空。"); return; }
                 SettingsStore.Set("DeviceName", name);
                 SettingsStore.Save();
-                // 重新连接以更新设备名
                 string deviceId = EnsureDeviceId();
                 _serverPushService.Dispose();
                 _serverPushService = new ServerPushService();

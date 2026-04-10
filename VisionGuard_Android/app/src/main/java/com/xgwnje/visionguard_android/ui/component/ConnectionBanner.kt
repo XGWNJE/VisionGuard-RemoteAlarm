@@ -34,9 +34,9 @@ fun ConnectionBanner(state: WsState, onlineCount: Int) {
     )
     val label = when (state) {
         WsState.CONNECTED    -> "● 已连接  ($onlineCount 台设备在线)"
-        WsState.CONNECTING   -> "◌ 连接中..."
-        WsState.AUTH_FAILED  -> "✕ 认证失败"
-        WsState.DISCONNECTED -> "○ 未连接"
+        WsState.CONNECTING   -> "◌ 连接中，请稍候..."
+        WsState.AUTH_FAILED  -> "✕ 认证失败，请检查 API Key"
+        WsState.DISCONNECTED -> "○ 连接断开，正在自动重连..."
     }
 
     Box(

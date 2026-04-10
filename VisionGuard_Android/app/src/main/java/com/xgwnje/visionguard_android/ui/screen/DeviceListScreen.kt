@@ -8,6 +8,7 @@ package com.xgwnje.visionguard_android.ui.screen
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -59,16 +60,20 @@ fun DeviceListScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(title = { Text("在线设备") })
+            TopAppBar(
+                title = { Text("在线设备") },
+                windowInsets = WindowInsets(0)
+            )
         },
         snackbarHost = {
             SnackbarHost(snackbarHost) { data ->
-                // 失败消息用红色背景
                 val isError = data.visuals.message.startsWith("✕")
                 Snackbar(
                     snackbarData = data,
-                    containerColor = if (isError) Color(0xFFB71C1C) else MaterialTheme.colorScheme.inverseSurface,
-                    contentColor = Color.White
+                    // 成功：深绿；失败：深红。硬编码颜色确保亮/暗模式下白字对比度始终足够
+                    containerColor = if (isError) Color(0xFFC62828) else Color(0xFF2E7D32),
+                    contentColor = Color.White,
+                    actionColor = Color.White
                 )
             }
         }

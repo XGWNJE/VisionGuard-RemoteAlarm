@@ -8,6 +8,7 @@ package com.xgwnje.visionguard_android.ui.screen
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -52,6 +53,7 @@ fun AlertListScreen(
         topBar = {
             TopAppBar(
                 title = { Text("警报") },
+                windowInsets = WindowInsets(0),
                 actions = {
                     IconButton(onClick = { alertVm.clearAlerts() }) {
                         Icon(Icons.Default.Delete, contentDescription = "清空")

@@ -1,9 +1,0 @@
-<Solution>
-  <Configurations>
-    <Platform Name="Any CPU" />
-    <Platform Name="x64" />
-  </Configurations>
-  <Project Path="VisionGuard.csproj" Id="ea43faa4-46fc-4b37-9ac1-649202302645">
-    <Platform Solution="*|x64" Project="x64" />
-  </Project>
-</Solution>

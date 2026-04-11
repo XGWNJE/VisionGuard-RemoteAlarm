@@ -159,7 +159,8 @@ class WebSocketClient {
                     }
 
                     override fun onFailure(ws: WebSocket, t: Throwable, response: Response?) {
-                        Log.w(TAG, "WS onFailure: ${t.javaClass.simpleName} - ${t.message} HTTP=${response?.code ?: \"n/a\"}")
+                        val httpCode = response?.code?.toString() ?: "n/a"
+                        Log.w(TAG, "WS onFailure: ${t.javaClass.simpleName} - ${t.message} HTTP=$httpCode")
                         _connectionState.value = WsState.DISCONNECTED
                     }
 

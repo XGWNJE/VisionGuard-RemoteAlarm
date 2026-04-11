@@ -103,6 +103,13 @@ class AlertForegroundService : LifecycleService() {
         lifecycleScope.launch {
             wsClient.connectionState.collect { state ->
                 _connectionState.value = state
+                // BUG 5 FIX：断连时清空设备列表（onFailure/onClosed 不经过 disconnect()）
+                if (state == WsState.DISCONNECTED || state == WsState.AUTH_FAILED) {
+                    if (_devices.value.isNotEmpty()) {
+                        Log.i(TAG, "WS 状态 → $state，清空设备列表")
+                        _devices.value = emptyList()
+                    }
+                }
                 val stateText = when (state) {
                     WsState.CONNECTED    -> "已连接"
                     WsState.CONNECTING   -> "连接中..."
@@ -128,6 +135,9 @@ class AlertForegroundService : LifecycleService() {
         // 订阅设备列表
         lifecycleScope.launch {
             wsClient.onDeviceList.collect { devices ->
+                Log.d(TAG, "设备列表更新: ${devices.size} 台 [${
+                    devices.joinToString { "${it.deviceName}(${if (it.online) "在" else "离"})" }
+                }]")
                 _devices.value = devices
             }
         }
@@ -226,5 +236,8 @@ class AlertForegroundService : LifecycleService() {
             this@AlertForegroundService, alert, notifId, null
         )
         nm.notify(notifId, notif)
+        // 更新分组摘要通知（20 台设备同时告警时防止通知栏泛滥）
+        nm.notify(NotificationHelper.ALERT_SUMMARY_NOTIF_ID,
+            NotificationHelper.buildAlertSummaryNotification(this@AlertForegroundService))
     }
 }

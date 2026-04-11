@@ -19,7 +19,17 @@ const windowsClients = new Map<string, WindowsClient>();
 const androidClients = new Map<string, AndroidClient>();
 
 // 追踪待处理的截图请求：alertId → androidDeviceId（用于 screenshot-data 回传路由）
-const pendingScreenshotRequests = new Map<string, string>();
+const pendingScreenshotRequests = new Map<string, Set<string>>();
+
+// 广播防抖：50ms 内多次触发合并为一次，防止 20 台心跳同步时产生广播风暴
+let _broadcastTimer: NodeJS.Timeout | null = null;
+function scheduleBroadcast(): void {
+  if (_broadcastTimer) return;
+  _broadcastTimer = setTimeout(() => {
+    _broadcastTimer = null;
+    broadcastDeviceList();
+  }, 50);
+}
 
 // ── 公开 API ──────────────────────────────────────────────
 
@@ -81,22 +91,40 @@ export function handleConnection(ws: WebSocket): void {
     }
   });
 
-  ws.on('close', () => {
+  ws.on('close', (code) => {
     clearTimeout(authTimer);
+    const ts = new Date().toISOString();
     if (deviceId) {
-      if (role === 'windows') {
+      if (role === 'windows' && windowsClients.has(deviceId)) {
         windowsClients.delete(deviceId);
-        console.log(`[ws] Windows 设备断开: ${deviceId}`);
-      } else if (role === 'android') {
+        console.log(`[ws][${ts}] Windows 断开: ${deviceId} code=${code} Windows在线=${windowsClients.size}`);
+        scheduleBroadcast();
+      } else if (role === 'android' && androidClients.has(deviceId)) {
         androidClients.delete(deviceId);
-        console.log(`[ws] Android 设备断开: ${deviceId}`);
+        console.log(`[ws][${ts}] Android 断开: ${deviceId} code=${code} Android在线=${androidClients.size}`);
+        scheduleBroadcast();
+      } else {
+        console.log(`[ws][${ts}] 关闭事件（已由 error 清理）: ${deviceId} code=${code}`);
       }
-      broadcastDeviceList();
+    } else {
+      console.log(`[ws][${ts}] 未认证连接关闭 code=${code}`);
     }
   });
 
   ws.on('error', (err) => {
-    console.error(`[ws] 连接错误:`, err.message);
+    const ts = new Date().toISOString();
+    console.error(`[ws][${ts}] 连接错误 deviceId=${deviceId ?? 'unauthenticated'} role=${role ?? '?'}: ${err.message}`);
+    if (deviceId) {
+      if (role === 'windows' && windowsClients.has(deviceId)) {
+        windowsClients.delete(deviceId);
+        console.log(`[ws][${ts}] Windows 因错误移除: ${deviceId}`);
+        scheduleBroadcast();
+      } else if (role === 'android' && androidClients.has(deviceId)) {
+        androidClients.delete(deviceId);
+        console.log(`[ws][${ts}] Android 因错误移除: ${deviceId}`);
+        scheduleBroadcast();
+      }
+    }
   });
 }
 
@@ -140,6 +168,7 @@ function handleAuth(
       ws,
       deviceId: msg.deviceId,
       deviceName: msg.deviceName,
+      clientType: msg.role,
       isMonitoring: false,
       isAlarming: false,
       isReady: false,
@@ -148,7 +177,7 @@ function handleAuth(
       confidence: 0.45,
       targets: '',
     });
-    console.log(`[ws] Windows 设备上线: ${msg.deviceName} (${msg.deviceId})`);
+    console.log(`[ws][${new Date().toISOString()}] Windows 上线: ${msg.deviceName} (${msg.deviceId}) | Windows在线: ${windowsClients.size} Android在线: ${androidClients.size}`);
   } else if (msg.role === 'android') {
     androidClients.set(msg.deviceId, { ws, deviceId: msg.deviceId, lastSeen: new Date() });
     // 监听 OkHttp ping 帧（每 25s 一次），更新存活时间
@@ -156,7 +185,7 @@ function handleAuth(
       const client = androidClients.get(msg.deviceId);
       if (client) client.lastSeen = new Date();
     });
-    console.log(`[ws] Android 设备上线: ${msg.deviceId}`);
+    console.log(`[ws][${new Date().toISOString()}] Android 上线: ${msg.deviceId} | Android在线: ${androidClients.size}`);
   } else {
     sendJson(ws, { type: 'auth-result', success: false, reason: 'invalid role' });
     ws.close();
@@ -172,7 +201,7 @@ function handleAuth(
     devices: buildDeviceList(),
   });
 
-  broadcastDeviceList();
+  scheduleBroadcast();
 }
 
 function handleHeartbeat(msg: WsHeartbeat): void {
@@ -195,7 +224,7 @@ function handleHeartbeat(msg: WsHeartbeat): void {
   if (msg.targets !== undefined) client.targets = msg.targets;
   client.lastSeen = new Date();
 
-  if (changed) broadcastDeviceList();
+  if (changed) scheduleBroadcast();
 }
 
 function handleCommand(senderWs: WebSocket, msg: WsCommand): void {
@@ -281,19 +310,25 @@ function handleRequestScreenshot(senderWs: WebSocket, msg: WsRequestScreenshot, 
     return;
   }
   // 登记路由：alertId → 发起请求的 Android deviceId（用于 screenshot-data 回传）
-  pendingScreenshotRequests.set(msg.alertId, senderDeviceId);
+  const existing = pendingScreenshotRequests.get(msg.alertId) ?? new Set<string>();
+  existing.add(senderDeviceId);
+  pendingScreenshotRequests.set(msg.alertId, existing);
   const relay: WsRequestScreenshotRelay = { type: 'request-screenshot', alertId: msg.alertId };
   target.ws.send(JSON.stringify(relay));
 }
 
 /** Windows 回传截图数据：路由给发起请求的 Android */
 function handleScreenshotData(msg: WsScreenshotData): void {
-  const targetDeviceId = pendingScreenshotRequests.get(msg.alertId);
-  if (!targetDeviceId) return;
+  const targetDeviceIds = pendingScreenshotRequests.get(msg.alertId);
+  if (!targetDeviceIds) return;
   pendingScreenshotRequests.delete(msg.alertId);
-  const targetClient = androidClients.get(targetDeviceId);
-  if (!targetClient || targetClient.ws.readyState !== WebSocket.OPEN) return;
-  targetClient.ws.send(JSON.stringify(msg));
+  const data = JSON.stringify(msg);
+  for (const targetDeviceId of targetDeviceIds) {
+    const targetClient = androidClients.get(targetDeviceId);
+    if (targetClient?.ws.readyState === WebSocket.OPEN) {
+      targetClient.ws.send(data);
+    }
+  }
 }
 
 function broadcastDeviceList(): void {
@@ -321,6 +356,7 @@ function buildDeviceList(): DeviceStatus[] {
       cooldown: c.cooldown,
       confidence: c.confidence,
       targets: c.targets,
+      clientType: c.clientType ?? 'windows',
     });
   }
   return devices;
@@ -332,14 +368,25 @@ function sendJson(ws: WebSocket, obj: object): void {
   }
 }
 
-// ── Android 存活检测：每 60s 清理超过 90s 无 ping 的幽灵连接 ──
+// ── 定时维护：每 30s ─────────────────────────────────────────────────────────
+// BUG 2/3 FIX: 定时推送 device-list，即使无状态变化也刷新 Android _lastMessageAt
+// BUG 4 FIX:   幽灵清理阈值从 90s 降至 75s，周期从 60s 降至 30s（最坏情况 105s）
 setInterval(() => {
-  const deadline = Date.now() - 90_000;
+  const now = Date.now();
+  const ts = new Date().toISOString();
+  const ghostDeadline = now - 75_000;
+
   for (const [id, client] of androidClients) {
-    if (client.lastSeen.getTime() < deadline) {
-      console.log(`[ws] Android 心跳超时，强制关闭: ${id} (最后活跃 ${Math.round((Date.now() - client.lastSeen.getTime()) / 1000)}s 前)`);
+    if (client.lastSeen.getTime() < ghostDeadline) {
+      const silentSec = Math.round((now - client.lastSeen.getTime()) / 1000);
+      console.log(`[ws][${ts}] Android 幽灵清理: ${id} (静默 ${silentSec}s)`);
       client.ws.terminate();
       androidClients.delete(id);
     }
   }
-}, 60_000);
+
+  if (androidClients.size > 0) {
+    broadcastDeviceList();
+    console.log(`[ws][${ts}] 定时推送 → ${androidClients.size} Android / ${windowsClients.size} Windows`);
+  }
+}, 30_000);

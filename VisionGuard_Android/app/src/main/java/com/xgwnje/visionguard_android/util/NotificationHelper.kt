@@ -26,6 +26,7 @@ object NotificationHelper {
     const val ALERT_CHANNEL_ID      = "vg_alert"
     const val FOREGROUND_CHANNEL_ID = "vg_foreground"
     const val FOREGROUND_NOTIF_ID   = 1
+    const val ALERT_SUMMARY_NOTIF_ID = 999
 
     fun createChannels(context: Context) {
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -90,7 +91,21 @@ object NotificationHelper {
             )
         }
 
+        builder.setGroup("vg_alerts")
+            .setGroupAlertBehavior(NotificationCompat.GROUP_ALERT_CHILDREN)
+
         return builder.build()
+    }
+
+    fun buildAlertSummaryNotification(context: Context): Notification {
+        return NotificationCompat.Builder(context, ALERT_CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_dialog_alert)
+            .setContentTitle("VisionGuard")
+            .setContentText("有新警报")
+            .setGroup("vg_alerts")
+            .setGroupSummary(true)
+            .setAutoCancel(true)
+            .build()
     }
 
     fun buildForegroundNotification(context: Context, stateText: String): Notification {

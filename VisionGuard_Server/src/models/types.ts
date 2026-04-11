@@ -102,6 +102,7 @@ export interface DeviceStatus {
   cooldown: number;
   confidence: number;
   targets: string;
+  clientType: string;
 }
 
 /** Android → 服务器：反向控制命令 */
@@ -171,6 +172,7 @@ export interface WindowsClient {
   ws: WebSocket;
   deviceId: string;
   deviceName: string;
+  clientType: string;
   isMonitoring: boolean;
   isAlarming: boolean;
   isReady: boolean;

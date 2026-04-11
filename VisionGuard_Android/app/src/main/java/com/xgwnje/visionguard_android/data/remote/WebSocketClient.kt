@@ -1,4 +1,4 @@
-package com.xgwnje.visionguard_android.data.remote
+﻿package com.xgwnje.visionguard_android.data.remote
 
 // ┌─────────────────────────────────────────────────────────┐
 // │ WebSocketClient.kt                                      │
@@ -104,6 +104,8 @@ class WebSocketClient {
         ws?.close(1000, "user disconnect")
         ws = null
         _connectionState.value = WsState.DISCONNECTED
+        _onDeviceList.value = emptyList()
+        Log.i(TAG, "WS disconnect()，设备列表已清空")
     }
 
     fun sendCommand(targetDeviceId: String, command: String) {
@@ -125,6 +127,7 @@ class WebSocketClient {
 
     private fun startConnectLoop() {
         connectJob?.cancel()
+        _onDeviceList.value = emptyList()
         connectJob = scope.launch {
             var attempt = 0
             while (shouldReconnect) {
@@ -140,7 +143,7 @@ class WebSocketClient {
 
                 val listener = object : WebSocketListener() {
                     override fun onOpen(ws: WebSocket, response: Response) {
-                        Log.i(TAG, "WS onOpen，发送认证")
+                        Log.i(TAG, "WS onOpen → 发送认证 deviceId=$deviceId")
                         val auth = WsAuthMessage(apiKey = apiKey, deviceId = deviceId)
                         ws.send(gson.toJson(auth))
                     }
@@ -150,13 +153,18 @@ class WebSocketClient {
                         handleMessage(text)
                     }
 
+                    override fun onMessage(ws: WebSocket, bytes: okio.ByteString) {
+                        _lastMessageAt = System.currentTimeMillis()
+                        Log.d(TAG, "WS 收到二进制帧: ${bytes.size} bytes")
+                    }
+
                     override fun onFailure(ws: WebSocket, t: Throwable, response: Response?) {
-                        Log.w(TAG, "WS 失败: ${t.message}")
+                        Log.w(TAG, "WS onFailure: ${t.javaClass.simpleName} - ${t.message} HTTP=${response?.code ?: \"n/a\"}")
                         _connectionState.value = WsState.DISCONNECTED
                     }
 
                     override fun onClosed(ws: WebSocket, code: Int, reason: String) {
-                        Log.i(TAG, "WS 关闭: $code $reason")
+                        Log.i(TAG, "WS onClosed: code=$code reason='$reason'")
                         _connectionState.value = WsState.DISCONNECTED
                     }
                 }
@@ -179,14 +187,17 @@ class WebSocketClient {
                     delay(waitSec * 1000)
                     attempt++
                 } else {
-                    // 已连接，每 15s 检查一次：连接是否仍有消息流动
-                    _lastMessageAt = System.currentTimeMillis()  // 重置计时
+                    // 已连接，每 20s 检查消息流动
+                    // 阈值 115s = 服务端幽灵清理(75s) + 服务端推送间隔(30s) + 余量(10s)
+                    // 服务端每 30s 定时推送 device-list，确保 _lastMessageAt 必然被刷新
+                    val GHOST_THRESHOLD_MS = 115_000L
+                    _lastMessageAt = System.currentTimeMillis()
                     while (_connectionState.value == WsState.CONNECTED && shouldReconnect) {
-                        delay(15_000)
+                        delay(20_000)
                         val silentMs = System.currentTimeMillis() - _lastMessageAt
-                        if (silentMs > 90_000) {
-                            // 超过 90s 无任何消息：幽灵连接，主动断开重连
-                            Log.w(TAG, "WS 超过 90s 无消息 (沉默 ${silentMs / 1000}s)，主动重连")
+                        Log.d(TAG, "WS 保活检查: 静默 ${silentMs / 1000}s / 阈值 ${GHOST_THRESHOLD_MS / 1000}s")
+                        if (silentMs > GHOST_THRESHOLD_MS) {
+                            Log.w(TAG, "WS 幽灵连接: 静默 ${silentMs / 1000}s，主动重连")
                             ws?.cancel()
                             _connectionState.value = WsState.DISCONNECTED
                             break
@@ -228,6 +239,7 @@ class WebSocketClient {
                 "device-list" -> {
                     val devicesArr = obj.getAsJsonArray("devices")
                     val devices = devicesArr?.map { gson.fromJson(it, DeviceInfo::class.java) } ?: emptyList()
+                    Log.d(TAG, "WS device-list: ${devices.size} 台设备")
                     _onDeviceList.value = devices
                 }
                 "command-ack" -> {

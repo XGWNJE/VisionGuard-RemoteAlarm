@@ -419,6 +419,8 @@ namespace VisionGuard.Services
         {
             if (_wsConnected == connected) return; // 状态未变，跳过（避免 OnError+OnClose 重复触发）
             _wsConnected = connected;
+            var ts = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ");
+            LogManager.StaticInfo($"[Server][{ts}] WS 状态 → {stateName} deviceId={_deviceId ?? "n/a"}");
             try { ConnectionStateChanged?.Invoke(this, stateName); }
             catch { }
         }

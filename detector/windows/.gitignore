@@ -33,7 +33,7 @@ dist/
 
 # ===== AI 生成的原始素材 =====
 *.png
-!Assets/screenshot.png
+!Assets/*.png
 
 # ===== 其他不需要入库的文件 =====
 dist/

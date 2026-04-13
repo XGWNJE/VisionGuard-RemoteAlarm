@@ -1,19 +1,21 @@
 // ┌─────────────────────────────────────────────────────────┐
 // │ LogManager.cs                                           │
 // │ 角色：线程安全日志，将消息 marshal 到 UI 线程写入 ListBox│
+// │       同时输出到 Visual Studio IDE 输出窗口             │
 // │ 线程：Info/Warn/Error 可在任意线程调用                  │
 // │ 依赖：ListBox (OwnerDrawListBox)                        │
 // │ 对外 API：Info(), Warn(), Error()                       │
 // │           StaticInfo/StaticWarn/StaticError (后台线程)  │
 // └─────────────────────────────────────────────────────────┘
 using System;
+using System.Diagnostics;
 using System.Windows.Forms;
 
 namespace VisionGuard.Utils
 {
     /// <summary>
-    /// 线程安全的日志管理器，将消息 marshal 到 UI 线程写入 ListBox。
-    /// 静态方法供无法访问实例的后台服务（如 ServerPushService）使用。
+    /// 线程安全的日志管理器，将消息 marshal 到 UI 线程写入 ListBox，
+    /// 同时输出到 Visual Studio IDE 输出窗口（Debug.WriteLine）。
     /// </summary>
     public class LogManager
     {
@@ -29,10 +31,24 @@ namespace VisionGuard.Utils
             _instance = this;   // 注册全局实例
         }
 
-        /// <summary>后台线程安全：INFO（转发到实例，无实例则 trace 丢弃）</summary>
-        public static void StaticInfo(string message)  => _instance?.Info(message);
-        public static void StaticWarn(string message)  => _instance?.Warn(message);
-        public static void StaticError(string message) => _instance?.Error(message);
+        /// <summary>后台线程安全：INFO（转发到实例，无实例则只写 IDE 输出）</summary>
+        public static void StaticInfo(string message)
+        {
+            Debug.WriteLine("[INFO] " + message);           // IDE 输出窗口
+            _instance?.Info(message);                      // ListBox（若有）
+        }
+
+        public static void StaticWarn(string message)
+        {
+            Debug.WriteLine("[WARN] " + message);          // IDE 输出窗口
+            _instance?.Warn(message);                       // ListBox（若有）
+        }
+
+        public static void StaticError(string message)
+        {
+            Debug.WriteLine("[ERR]  " + message);           // IDE 输出窗口
+            _instance?.Error(message);                      // ListBox（若有）
+        }
 
         public void Info(string message)  => Append("[INFO] " + message);
         public void Warn(string message)  => Append("[WARN] " + message);

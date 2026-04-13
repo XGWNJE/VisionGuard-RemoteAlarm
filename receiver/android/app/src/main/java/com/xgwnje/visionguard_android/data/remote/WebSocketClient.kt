@@ -79,10 +79,61 @@ class WebSocketClient {
 
     private var ws: WebSocket? = null
     private var connectJob: Job? = null
+    private var heartbeatJob: Job? = null
     private var shouldReconnect = false
 
     // 最后收到任意消息的时间戳（用于幽灵连接检测）
     @Volatile private var _lastMessageAt = 0L
+
+    // 心跳计数（用于减少日志频率）
+    private var heartbeatCount = 0
+
+    // 上次断开原因（用于诊断）
+    private var lastDisconnectReason = "initial"
+
+    // Session 追踪：本次连接开始时间
+    @Volatile private var sessionStartTime = 0L
+
+    // Session 追踪：上次连接持续时长（毫秒）
+    private var lastSessionDurationMs = -1L
+
+    // ── 断开原因上报 ──────────────────────────────────────────
+    private fun sendDisconnectReason(reason: String, detail: String = "") {
+        if (ws == null) return
+        val msg = mapOf(
+            "type" to "disconnect-reason",
+            "reason" to reason,
+            "detail" to detail
+        )
+        try {
+            ws?.send(gson.toJson(msg))
+        } catch (e: Exception) {
+            Log.w(TAG, "发送断开原因失败: ${e.message}")
+        }
+    }
+
+    // ── Session 信息上报（重连时发给服务器，帮助诊断） ──────────
+    private fun sendSessionInfo() {
+        if (ws == null) return
+        // 判断本次是否为重连（上次 Session 持续时长有值）
+        val isReconnect = lastSessionDurationMs >= 0
+        val msg = mapOf(
+            "type" to "session-info",
+            "deviceId" to deviceId,
+            "lastSessionEndReason" to lastDisconnectReason,
+            "lastSessionDurationMs" to lastSessionDurationMs,
+            "isReconnect" to isReconnect
+        )
+        try {
+            ws?.send(gson.toJson(msg))
+            Log.i(TAG, """WS Session 上报:
+                |  isReconnect=$isReconnect
+                |  lastSessionEndReason=$lastDisconnectReason
+                |  lastSessionDurationMs=$lastSessionDurationMs""".trimMargin())
+        } catch (e: Exception) {
+            Log.w(TAG, "发送 Session 信息失败: ${e.message}")
+        }
+    }
 
     // ── 公开 API ──────────────────────────────────────────────
 
@@ -91,15 +142,29 @@ class WebSocketClient {
         this.apiKey    = apiKey
         this.deviceId  = deviceId
         shouldReconnect = true
+        // 重置 Session 开始时间（用于计算本次连接持续时长）
+        sessionStartTime = System.currentTimeMillis()
         // 重置认证失败状态，让 UI 显示 CONNECTING
         if (_connectionState.value == WsState.AUTH_FAILED) {
             _connectionState.value = WsState.DISCONNECTED
         }
+        Log.i(TAG, """WS connect:
+            |  serverUrl: $serverUrl
+            |  deviceId: $deviceId
+            |  pingInterval: 25s
+            |  connectTimeout: 10s""".trimMargin())
         startConnectLoop()
     }
 
     fun disconnect() {
         shouldReconnect = false
+        lastDisconnectReason = "user-close"
+        sendDisconnectReason("user-close", "用户主动断开")
+        // 记录本次 Session 持续时长
+        if (sessionStartTime > 0) {
+            lastSessionDurationMs = System.currentTimeMillis() - sessionStartTime
+            Log.i(TAG, "WS disconnect，Session 持续 ${lastSessionDurationMs / 1000}s")
+        }
         connectJob?.cancel()
         ws?.close(1000, "user disconnect")
         ws = null
@@ -132,7 +197,7 @@ class WebSocketClient {
             var attempt = 0
             while (shouldReconnect) {
                 _connectionState.value = WsState.CONNECTING
-                Log.i(TAG, "WS 连接中 → $serverUrl (第${attempt + 1}次)")
+                Log.i(TAG, "WS 连接中 → $serverUrl (第${attempt + 1}次) 上次断开原因=$lastDisconnectReason")
 
                 val wsUrl = serverUrl
                     .replace("https://", "wss://")
@@ -155,17 +220,49 @@ class WebSocketClient {
 
                     override fun onMessage(ws: WebSocket, bytes: okio.ByteString) {
                         _lastMessageAt = System.currentTimeMillis()
-                        Log.d(TAG, "WS 收到二进制帧: ${bytes.size} bytes")
+                        Log.d(TAG, "WS 收到二进制 帧: ${bytes.size} bytes")
                     }
 
                     override fun onFailure(ws: WebSocket, t: Throwable, response: Response?) {
                         val httpCode = response?.code?.toString() ?: "n/a"
-                        Log.w(TAG, "WS onFailure: ${t.javaClass.simpleName} - ${t.message} HTTP=$httpCode")
+                        val (disconnectType, detail) = when {
+                            t.message?.contains("Unable to connect") == true -> Pair("server-unreachable", "无法连接到服务器")
+                            t.message?.contains("timeout") == true -> Pair("network-timeout", "连接超时")
+                            t.message?.contains("refused") == true -> Pair("connection-refused", "连接被拒绝")
+                            t.message?.contains("canceled") == true -> Pair("user-canceled", "用户取消")
+                            t.message?.contains("network") == true -> Pair("network-lost", "网络中断")
+                            else -> Pair("unknown", t.message ?: "未知错误")
+                        }
+                        lastDisconnectReason = disconnectType
+                        // 记录 Session 结束：onFailure 时计算本次持续时长
+                        if (sessionStartTime > 0) {
+                            lastSessionDurationMs = System.currentTimeMillis() - sessionStartTime
+                            Log.w(TAG, "WS onFailure，Session 持续 ${lastSessionDurationMs / 1000}s 原因=$disconnectType")
+                        }
+                        Log.w(TAG, """WS onFailure:
+                            |  断开类型: $disconnectType
+                            |  异常类型: ${t.javaClass.simpleName}
+                            |  异常消息: $detail
+                            |  HTTP状态码: $httpCode
+                            |  当前状态: ${_connectionState.value}""".trimMargin())
                         _connectionState.value = WsState.DISCONNECTED
                     }
 
                     override fun onClosed(ws: WebSocket, code: Int, reason: String) {
-                        Log.i(TAG, "WS onClosed: code=$code reason='$reason'")
+                        val (disconnectType, codeName) = when (code) {
+                            1000 -> Pair("user-close", "正常关闭")
+                            1001 -> Pair("server-kick", "服务器关闭")
+                            1005 -> Pair("no-status", "无状态码")
+                            1006 -> Pair("network-lost", "异常断开 (网络中断)")
+                            else -> Pair("unknown", "code=$code")
+                        }
+                        lastDisconnectReason = disconnectType
+                        // 记录 Session 结束：计算本次持续时长
+                        if (sessionStartTime > 0) {
+                            lastSessionDurationMs = System.currentTimeMillis() - sessionStartTime
+                            Log.i(TAG, "WS onClosed，Session 持续 ${lastSessionDurationMs / 1000}s 原因=$disconnectType")
+                        }
+                        Log.i(TAG, "WS onClosed: type=$disconnectType code=$codeName reason='$reason'")
                         _connectionState.value = WsState.DISCONNECTED
                     }
                 }
@@ -188,17 +285,32 @@ class WebSocketClient {
                     delay(waitSec * 1000)
                     attempt++
                 } else {
-                    // 已连接，每 20s 检查消息流动
+                    // 已连接，每 30s 发送应用层心跳并检查消息流动
                     // 阈值 115s = 服务端幽灵清理(75s) + 服务端推送间隔(30s) + 余量(10s)
-                    // 服务端每 30s 定时推送 device-list，确保 _lastMessageAt 必然被刷新
+                    // 心跳同时刷新服务器端的 lastSeen，防止被幽灵清理
                     val GHOST_THRESHOLD_MS = 115_000L
                     _lastMessageAt = System.currentTimeMillis()
+                    heartbeatCount = 0
                     while (_connectionState.value == WsState.CONNECTED && shouldReconnect) {
-                        delay(20_000)
+                        delay(30_000)
+                        if (_connectionState.value != WsState.CONNECTED || !shouldReconnect) break
+
+                        // 发送应用层心跳
+                        val hbMsg = mapOf("type" to "heartbeat-android", "deviceId" to deviceId)
+                        ws?.send(gson.toJson(hbMsg))
+                        heartbeatCount++
+                        if (heartbeatCount == 1 || heartbeatCount % 10 == 0) {
+                            Log.d(TAG, "WS 发送心跳 #${heartbeatCount} deviceId=$deviceId")
+                        }
+
                         val silentMs = System.currentTimeMillis() - _lastMessageAt
-                        Log.d(TAG, "WS 保活检查: 静默 ${silentMs / 1000}s / 阈值 ${GHOST_THRESHOLD_MS / 1000}s")
+                        Log.v(TAG, "WS 保活检查: 静默 ${silentMs / 1000}s / 阈值 ${GHOST_THRESHOLD_MS / 1000}s")
                         if (silentMs > GHOST_THRESHOLD_MS) {
-                            Log.w(TAG, "WS 幽灵连接: 静默 ${silentMs / 1000}s，主动重连")
+                            Log.w(TAG, """WS 幽灵连接检测:
+                                |  静默时间: ${silentMs / 1000}s (阈值: ${GHOST_THRESHOLD_MS / 1000}s)
+                                |  deviceId: $deviceId
+                                |  连接状态: ${_connectionState.value}
+                                |  触发主动重连""".trimMargin())
                             ws?.cancel()
                             _connectionState.value = WsState.DISCONNECTED
                             break
@@ -226,6 +338,8 @@ class WebSocketClient {
                     if (success) {
                         Log.i(TAG, "WS 认证成功")
                         _connectionState.value = WsState.CONNECTED
+                        // 认证成功后，上报 Session 信息（帮助服务端诊断上次断开原因）
+                        sendSessionInfo()
                     } else {
                         val reason = obj.get("reason")?.asString ?: "unknown"
                         Log.w(TAG, "WS 认证失败: $reason")

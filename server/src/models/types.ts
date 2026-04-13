@@ -38,13 +38,16 @@ export type WsMessageType =
   | 'auth'
   | 'auth-result'
   | 'heartbeat'
+  | 'heartbeat-android'
   | 'alert'
   | 'device-list'
   | 'command'
   | 'command-ack'
   | 'set-config'
   | 'request-screenshot'
-  | 'screenshot-data';
+  | 'screenshot-data'
+  | 'disconnect-reason'
+  | 'session-info';
 
 /** 客户端 → 服务器：认证 */
 export interface WsAuthMessage {
@@ -72,6 +75,12 @@ export interface WsHeartbeat {
   cooldown?: number;
   confidence?: number;
   targets?: string;
+}
+
+/** Android → 服务器：心跳 (每 30 秒，补充 ping 帧的可靠性) */
+export interface WsHeartbeatAndroid {
+  type: 'heartbeat-android';
+  deviceId: string;
 }
 
 /** 服务器 → Android：报警推送 */
@@ -153,6 +162,25 @@ export interface WsScreenshotData {
   imageBase64: string;
   width: number;
   height: number;
+}
+
+/** 客户端 → 服务器：主动断开原因（帮助服务端诊断） */
+export interface WsDisconnectReason {
+  type: 'disconnect-reason';
+  reason: 'user-close' | 'network-lost' | 'server-kick' | 'app-killed' | 'server-unreachable' | 'auth-failed' | 'unknown';
+  detail?: string;
+}
+
+/** Android → 服务器：重连时上报上次 Session 结束原因（帮助服务端诊断） */
+export interface WsSessionInfo {
+  type: 'session-info';
+  deviceId: string;
+  /** 上次连接是怎么结束的 */
+  lastSessionEndReason: 'user-close' | 'network-lost' | 'server-kick' | 'app-killed' | 'unknown';
+  /** 上次连接持续了多久（毫秒），-1 表示未知 */
+  lastSessionDurationMs: number;
+  /** 本次是重连还是首次连接 */
+  isReconnect: boolean;
 }
 
 /** 服务器 → Android：命令确认（服务器生成 或 Windows 主动回包） */

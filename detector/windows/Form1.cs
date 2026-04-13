@@ -517,9 +517,10 @@ namespace VisionGuard
                 _log.Info("[Server] 自动连接中…");
             }
 
-            // 启动心跳定时器（5秒）—— 连接建立后立即开始，无论监控是否运行
+            // 启动心跳定时器（3秒）—— 连接建立后立即开始，无论监控是否运行
             // SendHeartbeat 内部有 _wsConnected 守卫，未连接时自动跳过
-            _heartbeatTimer = new System.Windows.Forms.Timer { Interval = 5000 };
+            // 3s 间隔配合服务器 75s 幽灵清理，可更快检测幽灵连接并触发重连
+            _heartbeatTimer = new System.Windows.Forms.Timer { Interval = 3000 };
             _heartbeatTimer.Tick += (s, ev) =>
                 _serverPushService.SendHeartbeat(
                     isMonitoring: _monitorService.IsStarted,

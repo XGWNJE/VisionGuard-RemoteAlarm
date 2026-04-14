@@ -1,6 +1,17 @@
 # VisionGuard
 
+![Version](https://img.shields.io/badge/version-v3.1.0-blue)
+
 基于 AI 的实时监控系统，支持多台 Windows 设备同时接入，通过自建服务器将报警和截图实时推送至 Android 手机。
+
+## 下载
+
+前往 [Releases](https://github.com/XGWNJE/VisionGuard-RemoteAlarm/releases/latest) 获取最新发行版：
+
+| 平台 | 文件 |
+|---|---|
+| Android | `VisionGuard-Android-vX.X.X.apk` |
+| Windows | `VisionGuard-Windows-vX.X.X.zip` |
 
 ## 架构
 
@@ -30,6 +41,8 @@ detector/windows/          server/                    receiver/android/
 - **按需截图** — Android 可主动请求任意已连接检测端的实时截图，支持多端并发
 - **断线感知** — 连接断开时设备列表立即清空，重连后自动恢复
 - **通知分组** — 多台设备同时报警时通知自动合并，不刷屏
+- **亮屏报警** — 报警时自动点亮屏幕并全屏展示通知，锁屏状态下也不遗漏
+- **呼吸灯提醒** — 支持 LED 呼吸灯闪烁，静默环境下仍可感知报警
 
 ## 快速开始
 

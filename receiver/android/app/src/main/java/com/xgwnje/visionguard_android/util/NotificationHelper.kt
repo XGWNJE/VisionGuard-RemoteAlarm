@@ -31,7 +31,7 @@ object NotificationHelper {
     fun createChannels(context: Context) {
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
-        // 报警通知：HIGH 优先级，声音+振动
+        // 报警通知：HIGH 优先级，声音+振动+呼吸灯
         val alertChannel = NotificationChannel(
             ALERT_CHANNEL_ID,
             "报警通知",
@@ -39,6 +39,7 @@ object NotificationHelper {
         ).apply {
             description = "VisionGuard 检测到目标时发送"
             enableVibration(true)
+            enableLights(true)  // 呼吸灯
         }
 
         // 前台服务常驻通知：LOW 优先级，静默
@@ -73,6 +74,16 @@ object NotificationHelper {
             "${it.label} ${(it.confidence * 100).toInt()}%"
         } ?: "检测到目标"
 
+        // 全屏 Intent：报警时点亮屏幕并显示通知内容
+        val fullScreenIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra("alertId", alert.alertId)
+        }
+        val fullScreenPi = PendingIntent.getActivity(
+            context, notifId + 10000, fullScreenIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
         val builder = NotificationCompat.Builder(context, ALERT_CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_dialog_alert)
             .setContentTitle("⚠ ${alert.deviceName}：$topLabel")
@@ -81,6 +92,8 @@ object NotificationHelper {
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setAutoCancel(true)
             .setContentIntent(pi)
+            .setFullScreenIntent(fullScreenPi, true)  // 亮屏显示通知
+            .setDefaults(NotificationCompat.DEFAULT_ALL)  // 声音+振动+呼吸灯
 
         if (largeIcon != null) {
             builder.setLargeIcon(largeIcon)

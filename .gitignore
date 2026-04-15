@@ -20,6 +20,19 @@ VisionGuard_Server/data/screenshots/
 
 # ===== Android 端 =====
 VisionGuard_Android/*.iml
+
+# ===== Detector Android 端 =====
+detector/android/.gradle/
+detector/android/.idea/
+detector/android/.kotlin/
+detector/android/local.properties
+detector/android/build/
+detector/android/app/build/
+detector/android/app/release/
+detector/android/.externalNativeBuild/
+detector/android/.cxx/
+detector/android/key/
+detector/android/app/*.jks
 VisionGuard_Android/keystore.properties
 VisionGuard_Android/app/*.jks
 VisionGuard_Android/.gradle/

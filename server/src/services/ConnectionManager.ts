@@ -21,10 +21,9 @@ const androidClients = new Map<string, AndroidClient>();
 
 // ── Session 追踪：记录每个 Android 设备上次连接的信息（用于重连诊断） ──
 interface AndroidSession {
-  deviceId: string;
-  connectedAt: number;            // 本次连接建立时间 (Date.now())
-  lastSessionEndReason: string;   // 上次是怎么断的
-  lastSessionDurationMs: number;  // 上次连接持续时长
+  connectedAt: number;
+  lastSessionEndReason: string;
+  lastSessionDurationMs: number;
 }
 const androidSessions = new Map<string, AndroidSession>();
 
@@ -34,8 +33,15 @@ const pendingScreenshotRequests = new Map<string, Set<string>>();
 // 追踪截图请求创建时间（用于超时诊断）
 const pendingScreenshotTimestamps = new Map<string, number>();
 
-// 截图请求超时时间（60秒）
 const SCREENSHOT_REQUEST_TIMEOUT_MS = 60_000;
+
+const SessionEndReasonNames: Record<string, string> = {
+  'user-close': '用户主动关闭',
+  'network-lost': '网络中断（被系统杀后台/锁屏休眠）',
+  'server-kick': '服务器主动断开',
+  'app-killed': '应用被强制停止',
+  'unknown': '未知原因',
+};
 
 // 广播防抖：50ms 内多次触发合并为一次，防止 20 台心跳同步时产生广播风暴
 let _broadcastTimer: NodeJS.Timeout | null = null;
@@ -45,6 +51,42 @@ function scheduleBroadcast(): void {
     _broadcastTimer = null;
     broadcastDeviceList();
   }, 50);
+}
+
+// ── 服务端主动 Ping：检测半开 TCP 连接 ────────────────────────
+// ws 库不自动 ping，需要手动实现。每 30s 对所有已认证连接发送 ping 帧，
+// 若上次 ping 未收到 pong 则判定连接已死。
+const PING_INTERVAL_MS = 30_000;
+const aliveClients = new WeakSet<WebSocket>();
+
+function markAlive(ws: WebSocket): void {
+  aliveClients.add(ws);
+}
+
+/**
+ * 初始化服务端 Ping 定时器（在 wss 创建后调用一次）
+ */
+export function initPing(): void {
+  setInterval(() => {
+    for (const [, client] of windowsClients) {
+      if (!aliveClients.has(client.ws)) {
+        console.log(`[ws][${new Date().toISOString()}] Ping 超时终止: Windows ${client.deviceName} (${client.deviceId})`);
+        client.ws.terminate();
+        continue;
+      }
+      aliveClients.delete(client.ws);
+      client.ws.ping();
+    }
+    for (const [, client] of androidClients) {
+      if (!aliveClients.has(client.ws)) {
+        console.log(`[ws][${new Date().toISOString()}] Ping 超时终止: Android ${client.deviceId}`);
+        client.ws.terminate();
+        continue;
+      }
+      aliveClients.delete(client.ws);
+      client.ws.ping();
+    }
+  }, PING_INTERVAL_MS);
 }
 
 // ── WebSocket 关闭码翻译表 ─────────────────────────────────
@@ -98,6 +140,10 @@ export function handleConnection(ws: WebSocket): void {
   const remoteIp = (ws as any).socket?.remoteAddress ?? 'unknown';
 
   console.log(`[ws][${ts}] 新连接 ← ${remoteIp} (等待认证, 超时 ${config.wsAuthTimeoutMs}ms)`);
+
+  // 标记新连接为存活（首次 ping 前默认存活），并监听 pong 回应
+  markAlive(ws);
+  ws.on('pong', () => markAlive(ws));
 
   // 5 秒内未认证则断开
   const authTimer = setTimeout(() => {
@@ -182,7 +228,7 @@ export function handleConnection(ws: WebSocket): void {
         console.log(`[ws][${ts}] Android 断开: ${deviceId} code=${code}(${codeName}) 推断原因=${endReason} Android在线=${androidClients.size}`);
         scheduleBroadcast();
       } else {
-        console.log(`[ws][${ts}] 关闭事件（已由 error 清理）: ${deviceId} code=${code}(${codeName})`);
+        console.log(`[ws][${ts}] 关闭事件（已由其他路径清理）: ${deviceId} code=${code}(${codeName})`);
       }
     } else {
       console.log(`[ws][${ts}] 未认证连接关闭 code=${code}(${codeName})`);
@@ -192,23 +238,8 @@ export function handleConnection(ws: WebSocket): void {
   ws.on('error', (err) => {
     const ts = new Date().toISOString();
     console.error(`[ws][${ts}] 连接错误 deviceId=${deviceId ?? 'unauthenticated'} role=${role ?? '?'} remoteIp=${remoteIp}: ${err.message}`);
-    if (deviceId) {
-      if (role === 'windows' && windowsClients.has(deviceId)) {
-        windowsClients.delete(deviceId);
-        console.log(`[ws][${ts}] Windows 因错误移除: ${deviceId}`);
-        scheduleBroadcast();
-      } else if (role === 'android' && androidClients.has(deviceId)) {
-        // 更新 session reason（与 close 中一致），防止 error→close 顺序时 reason 被跳过
-        const session = androidSessions.get(deviceId);
-        if (session) {
-          session.lastSessionEndReason = 'app-killed'; // error 通常意味着进程异常终止
-          session.lastSessionDurationMs = Date.now() - session.connectedAt;
-        }
-        androidClients.delete(deviceId);
-        console.log(`[ws][${ts}] Android 因错误移除: ${deviceId}`);
-        scheduleBroadcast();
-      }
-    }
+    // 不在 error 中清理连接，ws 库保证 error 之后 close 必定触发。
+    // 让 close handler 用准确的 close code 推断断开原因。
   });
 }
 
@@ -218,13 +249,6 @@ export function handleConnection(ws: WebSocket): void {
 export function broadcastAlert(alert: WsAlertPush): void {
   const result = broadcastToAndroid(alert, `alert:${alert.alertId}`);
   console.log(`[ws][${new Date().toISOString()}] 报警广播: alertId=${alert.alertId} 发送成功=${result.success} 失败=${result.failed}`);
-}
-
-/**
- * 获取当前设备列表快照 (供 HTTP 接口使用)
- */
-export function getDeviceList(): DeviceStatus[] {
-  return buildDeviceList();
 }
 
 // ── 内部处理 ──────────────────────────────────────────────
@@ -246,6 +270,14 @@ function handleAuth(
   }
 
   if (msg.role === 'windows') {
+    const existingClient = windowsClients.get(msg.deviceId);
+    if (existingClient) {
+      console.log(`[ws][${ts}] Windows 重复连接: ${msg.deviceName} (${msg.deviceId}) 踢掉旧连接`);
+      // 先删除再 terminate，防止 close 事件误删新连接
+      windowsClients.delete(msg.deviceId);
+      sendJson(existingClient.ws, { type: 'kicked', reason: 'duplicate connection' });
+      existingClient.ws.terminate();
+    }
     const clientData: WindowsClient = {
       ws,
       deviceId: msg.deviceId,
@@ -262,7 +294,15 @@ function handleAuth(
     windowsClients.set(msg.deviceId, clientData);
     console.log(`[ws][${ts}] Windows 上线: ${msg.deviceName} (${msg.deviceId}) | Windows在线: ${windowsClients.size} Android在线: ${androidClients.size}`);
   } else if (msg.role === 'android') {
-    // 修复: 使用闭包外的本地变量捕获 deviceId，避免闭包陷阱
+    const existingClient = androidClients.get(msg.deviceId);
+    if (existingClient) {
+      console.log(`[ws][${ts}] Android 重复连接: ${msg.deviceId} 踢掉旧连接`);
+      // 先删除再 terminate，防止 close 事件误删新连接
+      androidClients.delete(msg.deviceId);
+      sendJson(existingClient.ws, { type: 'kicked', reason: 'duplicate connection' });
+      existingClient.ws.terminate();
+    }
+    // 使用闭包外本地变量捕获 deviceId，避免闭包陷阱
     const pingDeviceId = msg.deviceId;
     const clientData: AndroidClient = { ws, deviceId: msg.deviceId, lastSeen: new Date() };
     androidClients.set(msg.deviceId, clientData);
@@ -271,7 +311,6 @@ function handleAuth(
     const prevSession = androidSessions.get(msg.deviceId);
     const now = Date.now();
     const session: AndroidSession = {
-      deviceId: msg.deviceId,
       connectedAt: now,
       lastSessionEndReason: prevSession?.lastSessionEndReason ?? 'unknown',
       lastSessionDurationMs: prevSession ? now - prevSession.connectedAt : -1,
@@ -281,14 +320,7 @@ function handleAuth(
     // 打印重连诊断信息
     if (prevSession) {
       const durationSec = Math.round((now - prevSession.connectedAt) / 1000);
-      const endReason: Record<string, string> = {
-        'user-close': '用户主动关闭',
-        'network-lost': '网络中断（被系统杀后台/锁屏休眠）',
-        'server-kick': '服务器主动断开',
-        'app-killed': '应用被强制停止',
-        'unknown': '未知原因',
-      };
-      const reasonDesc = endReason[prevSession.lastSessionEndReason] ?? `code=${prevSession.lastSessionEndReason}`;
+      const reasonDesc = SessionEndReasonNames[prevSession.lastSessionEndReason] ?? `code=${prevSession.lastSessionEndReason}`;
       console.log(`[ws][${ts}] Android 重连诊断: deviceId=${msg.deviceId} 上次持续${durationSec}s | 结束原因: ${reasonDesc} | Android在线: ${androidClients.size}`);
     } else {
       console.log(`[ws][${ts}] Android 首次连接: ${msg.deviceId} | Android在线: ${androidClients.size}`);
@@ -348,14 +380,15 @@ function handleHeartbeat(msg: WsHeartbeat): void {
   if (msg.cooldown !== undefined) client.cooldown = msg.cooldown;
   if (msg.confidence !== undefined) client.confidence = msg.confidence;
   if (msg.targets !== undefined) client.targets = msg.targets;
-  client.lastSeen = new Date();
 
-  // 每 60 次心跳（约 5 分钟）打一次日志，避免刷屏
   const count = (_heartbeatCounter.get(msg.deviceId) ?? 0) + 1;
   _heartbeatCounter.set(msg.deviceId, count % 60 === 0 ? 0 : count);
   if (count === 1 || count % 60 === 0) {
-    console.log(`[ws][${new Date().toISOString()}] Windows 心跳: ${client.deviceName} (${msg.deviceId}) monitoring=${msg.isMonitoring} alarming=${msg.isAlarming} 静默${Math.round((Date.now() - client.lastSeen.getTime()) / 1000)}s`);
+    const silentSec = Math.round((Date.now() - client.lastSeen.getTime()) / 1000);
+    console.log(`[ws][${new Date().toISOString()}] Windows 心跳: ${client.deviceName} (${msg.deviceId}) monitoring=${msg.isMonitoring} alarming=${msg.isAlarming} 静默${silentSec}s`);
   }
+
+  client.lastSeen = new Date();
 
   if (changed) scheduleBroadcast();
 }
@@ -387,15 +420,8 @@ function handleDisconnectReason(msg: WsDisconnectReason, role: string | null, de
 /** Android 重连时上报上次 Session 详细信息 */
 function handleSessionInfo(msg: WsSessionInfo): void {
   const ts = new Date().toISOString();
-  const reasonNames: Record<string, string> = {
-    'user-close': '用户主动关闭',
-    'network-lost': '网络中断（被系统杀后台/锁屏休眠）',
-    'server-kick': '服务器主动断开',
-    'app-killed': '应用被强制停止',
-    'unknown': '未知原因',
-  };
   const durationSec = msg.lastSessionDurationMs >= 0 ? `${Math.round(msg.lastSessionDurationMs / 1000)}s` : '未知';
-  const reasonDesc = reasonNames[msg.lastSessionEndReason] ?? msg.lastSessionEndReason;
+  const reasonDesc = SessionEndReasonNames[msg.lastSessionEndReason] ?? msg.lastSessionEndReason;
   console.log(`[ws][${ts}] Android Session 上报: deviceId=${msg.deviceId} isReconnect=${msg.isReconnect} 上次结束原因=${reasonDesc} 上次持续=${durationSec}`);
 
   // 采纳 Android 上报的结束原因（Android 端有更准确的上下文）
@@ -588,18 +614,18 @@ function broadcastToAndroid(msg: object, context?: string): { success: number; f
 }
 
 // ── 定时维护：每 30s ─────────────────────────────────────────────────────────
-// 幽灵清理: 75s 内无消息视为离线（心跳 5s × 3 = 15s，加上网络波动余量）
-// Android 端依赖 OkHttp ping 帧(25s) 维持，Windows 端依赖心跳(5s) 维持
+// 幽灵清理: 超过 config.deviceOfflineMs 无消息的连接视为死连接并终止。
+// Windows 心跳 15s, Android 心跳 20s + OkHttp ping 20s, 75s 阈值可覆盖 3-4 轮丢失。
 setInterval(() => {
   const now = Date.now();
   const ts = new Date().toISOString();
-  const ghostDeadline = now - 75_000;
+  const ghostDeadline = now - config.deviceOfflineMs;
 
   // Android 幽灵清理
   for (const [id, client] of androidClients) {
     if (client.lastSeen.getTime() < ghostDeadline) {
       const silentSec = Math.round((now - client.lastSeen.getTime()) / 1000);
-      console.log(`[ws][${ts}] Android 幽灵清理: ${id} (静默 ${silentSec}s 阈值 75s)`);
+      console.log(`[ws][${ts}] Android 幽灵清理: ${id} (静默 ${silentSec}s 阈值 ${config.deviceOfflineMs / 1000}s)`);
       client.ws.terminate();
       androidClients.delete(id);
       _heartbeatCounter.delete(id);
@@ -610,11 +636,16 @@ setInterval(() => {
   for (const [id, client] of windowsClients) {
     if (client.lastSeen.getTime() < ghostDeadline) {
       const silentSec = Math.round((now - client.lastSeen.getTime()) / 1000);
-      console.log(`[ws][${ts}] Windows 幽灵清理: ${client.deviceName} (${id}) 静默 ${silentSec}s 阈值 75s`);
+      console.log(`[ws][${ts}] Windows 幽灵清理: ${client.deviceName} (${id}) 静默 ${silentSec}s 阈值 ${config.deviceOfflineMs / 1000}s`);
       client.ws.terminate();
       windowsClients.delete(id);
       _heartbeatCounter.delete(id);
     }
+  }
+
+  // 向 Windows 发送 keep-alive（防止 Windows 端 60s 幽灵检测误判断连）
+  for (const client of windowsClients.values()) {
+    sendJson(client.ws, { type: 'ping' });
   }
 
   if (androidClients.size > 0 || windowsClients.size > 0) {

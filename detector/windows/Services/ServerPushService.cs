@@ -1,18 +1,17 @@
 // ┌─────────────────────────────────────────────────────────┐
 // │ ServerPushService.cs                                    │
-// │ 角色：WebSocket 客户端（心跳+命令接收+截图按需转发）     │
-// │ 对外 API：Configure(), PushAlert(), SendHeartbeat(),    │
-// │           Disconnect(), IsConnected, 事件               │
-// │ 特性：ServerUrl 为空时完全静默，离线失败不影响本地流程   │
+// │ 架构：单状态源 + 单事件循环 + Session 隔离              │
+// │   • 所有状态变更通过 _events 队列串行处理               │
+// │   • 每次连接一个独立 Session，Shutdown 后子线程退出     │
+// │   • lastMessageAt 只由真实消息更新，心跳不自我喂食      │
 // └─────────────────────────────────────────────────────────┘
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
 using System.Linq;
-using System.Net.Http;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using WebSocketSharp;
@@ -21,169 +20,138 @@ using VisionGuard.Utils;
 
 namespace VisionGuard.Services
 {
+    public enum WsState { Disconnected, Connecting, Connected, AuthFailed }
+
     public sealed class ServerPushService : IDisposable
     {
         // ── 对外事件 ─────────────────────────────────────────────────
-        /// <summary>"connected" / "disconnected" / "connecting"</summary>
+        /// <summary>"connected" / "connecting" / "disconnected"</summary>
         public event EventHandler<string> ConnectionStateChanged;
 
         /// <summary>"pause" / "resume" / "stop-alarm"</summary>
         public event EventHandler<string> CommandReceived;
 
-        /// <summary>set-config 命令：key=配置项名, value=新值（字符串形式）</summary>
+        /// <summary>set-config 命令：key=配置项名, value=新值</summary>
         public event EventHandler<KeyValuePair<string, string>> SetConfigReceived;
 
-        // ── 配置 ─────────────────────────────────────────────────────
-        private string _serverUrl;
-        private string _apiKey;
-        private string _deviceId;
-        private string _deviceName;
+        // ── 常量 ─────────────────────────────────────────────────────
+        private const int HEARTBEAT_INTERVAL_MS = 15_000;
+        private const int GHOST_THRESHOLD_MS = 60_000;
+        private const int AUTH_TIMEOUT_MS = 12_000;
+        private const int SEND_TIMEOUT_MS = 5_000;
+        private static readonly int[] BackoffSeconds = { 1, 2, 3, 5, 10, 20 };
 
-        private bool _configured;
+        // ── 配置（仅事件循环访问） ───────────────────────────────────
+        private string _serverUrl = "";
+        private string _apiKey = "";
+        private string _deviceId = "";
+        private string _deviceName = "";
+        private bool _shouldReconnect;
+        private int _attempt;
 
-        // ── HTTP ─────────────────────────────────────────────────────
-        private static readonly HttpClient _http = new HttpClient
-        {
-            Timeout = TimeSpan.FromSeconds(15)
-        };
+        // ── 状态（仅事件循环访问） ──────────────────���────────────────
+        private WsState _state = WsState.Disconnected;
+        private Session _session;
+        private Timer _backoffTimer;
 
-        // ── WebSocket ────────────────────────────────────────────────
-        private WebSocket _ws;
-        private CancellationTokenSource _wsCts;
-        private Thread _wsThread;
-        private bool _wsConnected;
-        private bool _authCompleted;
-        private readonly object _sendLock = new object();
+        // ── 事件循环 ────────────────────────────────────────────────
+        private readonly BlockingCollection<Action> _events = new BlockingCollection<Action>();
+        private readonly Thread _loopThread;
 
-        // 用于等待认证结果返回
-        private readonly ManualResetEventSlim _authEvent = new ManualResetEventSlim(false);
-        private bool _authSuccess;
-
-        // 最后断开原因（用于日志）
-        private string _lastDisconnectReason = "initial";
-        private bool _lastDisconnectWasClean = false;
-
-        // 心跳计数（用于减少日志频率）
-        private int _heartbeatCount = 0;
+        // ── 心跳参数（UI 写，Session 读） ────────────────────────────
+        private readonly object _hbParamsLock = new object();
+        private bool _hbIsMonitoring, _hbIsAlarming, _hbIsReady;
+        private int _hbCooldown = 5;
+        private float _hbConfidence = 0.45f;
+        private string _hbTargets = "";
 
         private bool _disposed;
 
-        // ── 发送保护 ─────────────────────────────────────────────────
-        // 心跳连续失败计数（避免单次抖动导致断连）
-        private int _heartbeatFailCount = 0;
-        private const int HEARTBEAT_FAIL_THRESHOLD = 3;   // 连续 3 次失败才触发重连
-        private const int SEND_TIMEOUT_MS = 5000;         // 发送超时 5s，防止阻塞
+        public bool IsConnected => _state == WsState.Connected;
 
-        // ── WebSocket 关闭码翻译 ─────────────────────────────────────
-        private static readonly Dictionary<ushort, string> CloseCodeReasons = new Dictionary<ushort, string>
+        public ServerPushService()
         {
-            { 1000, "正常关闭" },
-            { 1001, "服务器关闭 (Going Away)" },
-            { 1002, "协议错误" },
-            { 1003, "不支持的数据类型" },
-            { 1005, "无状态码 (Never closing)" },
-            { 1006, "异常断开 (网络中断/服务器崩溃)" },
-            { 1007, "消息格式错误" },
-            { 1008, "消息内容违反策略" },
-            { 1009, "消息过大" },
-            { 1010, "必要扩展未协商成功" },
-            { 1011, "服务器内部错误" },
-            { 1015, "TLS 握手失败" },
-        };
-
-        private string GetCloseCodeReason(ushort code)
-        {
-            return CloseCodeReasons.TryGetValue(code, out var reason) ? reason : $"未知错误 (code={code})";
+            _loopThread = new Thread(EventLoop) { IsBackground = true, Name = "VG_WsEventLoop" };
+            _loopThread.Start();
         }
 
-        // ── 断开原因上报 ──────────────────────────────────────────
-        private enum DisconnectReason {
-            UserClose,
-            NetworkError,
-            ServerUnreachable,
-            AuthFailed,
-            Unknown
+        private void Post(Action action)
+        {
+            if (_disposed) return;
+            try { _events.Add(action); } catch { /* 已关闭 */ }
         }
 
-        private void SendDisconnectReason(DisconnectReason reason, string detail = "")
+        private void EventLoop()
         {
-            if (!_configured || _ws == null) return;
-            string reasonStr;
-            switch (reason) {
-                case DisconnectReason.UserClose: reasonStr = "user-close"; break;
-                case DisconnectReason.NetworkError: reasonStr = "network-error"; break;
-                case DisconnectReason.ServerUnreachable: reasonStr = "server-unreachable"; break;
-                case DisconnectReason.AuthFailed: reasonStr = "auth-failed"; break;
-                default: reasonStr = "unknown"; break;
-            }
-            var msg = new Dictionary<string, object>
+            foreach (var action in _events.GetConsumingEnumerable())
             {
-                ["type"] = "disconnect-reason",
-                ["reason"] = reasonStr,
-                ["detail"] = detail
-            };
-            try {
-                _ws.Send(SimpleJson.ToJson(msg));
-            } catch { /* 忽略发送失败 */ }
+                try { action(); }
+                catch (Exception ex) { LogManager.StaticWarn($"[Server] 事件异常: {ex.Message}"); }
+            }
         }
 
-        // ── 指数退避参数 ─────────────────────────────────────────────
-        private static readonly int[] BackoffSeconds = { 2, 4, 8, 16, 30, 60 };
-
         // ════════════════════════════════════════════════════════════
-        // 公开 API
+        // 公开 API（线程安全，通过事件队列路由）
         // ════════════════════════════════════════════════════════════
 
-        /// <summary>
-        /// 配置服务器参数并启动 WS 连接。
-        /// ServerUrl 为空时静默不启动（保持当前版本行为）。
-        /// </summary>
         public void Configure(string serverUrl, string apiKey, string deviceId, string deviceName)
         {
-            _serverUrl  = (serverUrl ?? "").TrimEnd('/');
-            _apiKey     = apiKey     ?? "";
-            _deviceId   = deviceId   ?? "";
-            _deviceName = deviceName ?? Environment.MachineName;
-
-            _configured = !string.IsNullOrWhiteSpace(_serverUrl);
-            if (!_configured) {
-                LogManager.StaticInfo($"[Server] Configure: ServerUrl 为空，静默不启动连接");
-                return;
-            }
-
-            LogManager.StaticInfo($"[Server] Configure: serverUrl={_serverUrl} deviceId={_deviceId} deviceName={_deviceName}");
-            StartWsLoop();
+            var url = (serverUrl ?? "").TrimEnd('/');
+            var key = apiKey ?? "";
+            var did = deviceId ?? "";
+            var dname = string.IsNullOrWhiteSpace(deviceName) ? Environment.MachineName : deviceName;
+            Post(() => OnConnect(url, key, did, dname));
         }
 
-        /// <summary>
-        /// 上传报警元数据（截图改为本地缓存，不上传到 VPS）。
-        /// 截图由 Android 按需从 Windows 拉取。
-        /// </summary>
+        public void Disconnect() => Post(OnDisconnect);
+
+        public void UpdateHeartbeatParams(bool isMonitoring, bool isAlarming, bool isReady,
+            int cooldown, float confidence, string targets)
+        {
+            lock (_hbParamsLock)
+            {
+                _hbIsMonitoring = isMonitoring;
+                _hbIsAlarming = isAlarming;
+                _hbIsReady = isReady;
+                _hbCooldown = cooldown;
+                _hbConfidence = confidence;
+                _hbTargets = targets ?? "";
+            }
+        }
+
         public void PushAlert(AlertEvent alert)
         {
-            if (!_configured || alert == null) return;
-
+            if (alert == null) return;
+            var s = _session;
+            if (s == null) return;
             var msg = new Dictionary<string, object>
             {
-                ["type"]      = "alert",
-                ["alertId"]   = alert.AlertId,
-                ["deviceId"]  = _deviceId,
+                ["type"] = "alert",
+                ["alertId"] = alert.AlertId,
+                ["deviceId"] = _deviceId,
                 ["deviceName"] = _deviceName,
                 ["timestamp"] = alert.Timestamp.ToString("o"),
                 ["detections"] = BuildDetectionsPayload(alert.Detections),
             };
-            if (!WsSendJson(msg))
-                LogManager.StaticWarn($"[Server] 报警发送失败 deviceId={_deviceId} alertId={alert.AlertId}");
+            if (!s.SendJson(msg))
+                LogManager.StaticWarn($"[Server] 报警发送失败 alertId={alert.AlertId}");
         }
 
-        /// <summary>
-        /// 处理 Android 按需请求的截图：读本地文件 → 等比缩放 → JPEG 压缩 → base64 → WS 发送。
-        /// 在 ThreadPool 线程上执行，不阻塞 WS 接收线程。
-        /// </summary>
+        public void SendCommandAck(string command, bool success, string reason = "")
+        {
+            _session?.SendJson(new Dictionary<string, object>
+            {
+                ["type"] = "command-ack",
+                ["command"] = command,
+                ["success"] = success,
+                ["reason"] = reason ?? "",
+            });
+        }
+
         public void SendScreenshotData(string alertId)
         {
-            if (!_configured || !_wsConnected || _ws == null) return;
-
+            var s = _session;
+            if (s == null || _state != WsState.Connected) return;
             try
             {
                 string path = AlertService.GetSnapshotPath(alertId);
@@ -192,45 +160,31 @@ namespace VisionGuard.Services
                     LogManager.StaticWarn($"[Server] 截图不存在: {alertId}");
                     return;
                 }
-
                 using (var bmp = new Bitmap(path))
                 {
-                    // 等比缩放到最大宽 960px，减少传输大小
                     const int MaxW = 960;
-                    Bitmap toSend;
-                    if (bmp.Width > MaxW)
-                    {
-                        int newH = (int)(bmp.Height * (MaxW / (double)bmp.Width));
-                        toSend = new Bitmap(bmp, new Size(MaxW, newH));
-                    }
-                    else
-                    {
-                        toSend = bmp;
-                    }
-
+                    Bitmap toSend = bmp.Width > MaxW
+                        ? new Bitmap(bmp, new Size(MaxW, (int)(bmp.Height * (MaxW / (double)bmp.Width))))
+                        : bmp;
                     try
                     {
                         using (var ms = new MemoryStream())
                         {
-                            // JPEG 压缩质量 65，960px 宽下约 80-150KB
-                            var jpegParams = new System.Drawing.Imaging.EncoderParameters(1);
-                            jpegParams.Param[0] = new System.Drawing.Imaging.EncoderParameter(
-                                System.Drawing.Imaging.Encoder.Quality, 65L);
-                            var jpegCodec = System.Drawing.Imaging.ImageCodecInfo
-                                .GetImageEncoders().FirstOrDefault(c => c.MimeType == "image/jpeg");
+                            var jpegParams = new EncoderParameters(1);
+                            jpegParams.Param[0] = new EncoderParameter(Encoder.Quality, 65L);
+                            var jpegCodec = ImageCodecInfo.GetImageEncoders()
+                                .FirstOrDefault(c => c.MimeType == "image/jpeg");
                             toSend.Save(ms, jpegCodec, jpegParams);
                             byte[] jpegBytes = ms.ToArray();
-
-                            var msg = new Dictionary<string, object>
+                            s.SendJson(new Dictionary<string, object>
                             {
-                                ["type"]        = "screenshot-data",
-                                ["alertId"]     = alertId,
+                                ["type"] = "screenshot-data",
+                                ["alertId"] = alertId,
                                 ["imageBase64"] = Convert.ToBase64String(jpegBytes),
-                                ["width"]       = toSend.Width,
-                                ["height"]      = toSend.Height,
-                            };
-                            WsSendJson(msg);
-                            LogManager.StaticInfo($"[Server] 截图发送: {alertId} ({jpegBytes.Length} bytes, {toSend.Width}x{toSend.Height})");
+                                ["width"] = toSend.Width,
+                                ["height"] = toSend.Height,
+                            });
+                            LogManager.StaticInfo($"[Server] 截图发送: {alertId} ({jpegBytes.Length}B, {toSend.Width}x{toSend.Height})");
                         }
                     }
                     finally
@@ -245,338 +199,408 @@ namespace VisionGuard.Services
             }
         }
 
-        /// <summary>发送心跳（由 Form1 的 3 秒定时器调用）</summary>
-        public void SendHeartbeat(bool isMonitoring, bool isAlarming, bool isReady,
-            int cooldown, float confidence, string targets)
-        {
-            if (!_configured || !_wsConnected || _ws == null) return;
-
-            var msg = new Dictionary<string, object>
-            {
-                ["type"]        = "heartbeat",
-                ["deviceId"]    = _deviceId,
-                ["isMonitoring"] = isMonitoring,
-                ["isAlarming"]  = isAlarming,
-                ["isReady"]     = isReady,
-                ["cooldown"]    = cooldown,
-                ["confidence"]  = confidence,
-                ["targets"]     = targets,
-            };
-
-            // 发送失败时：连续 HEARTBEAT_FAIL_THRESHOLD 次才触发重连，避免单次抖动断连
-            if (!WsSendJson(msg))
-            {
-                _heartbeatFailCount++;
-                if (_heartbeatFailCount >= HEARTBEAT_FAIL_THRESHOLD)
-                {
-                    LogManager.StaticWarn($"[Server] 心跳连续{_heartbeatFailCount}次发送失败，触发重连 deviceId={_deviceId}");
-                    _wsCts?.Cancel();
-                    try { _ws?.Close(); } catch { }
-                    _heartbeatFailCount = 0; // 触发重连后重置计数
-                }
-                else
-                {
-                    LogManager.StaticInfo($"[Server] 心跳发送失败({_heartbeatFailCount}/{HEARTBEAT_FAIL_THRESHOLD}) deviceId={_deviceId}");
-                }
-                return;
-            }
-
-            // 发送成功，重置失败计数
-            _heartbeatFailCount = 0;
-
-            // 每 60 次心跳（约 3 分钟）打一次日志，避免刷屏
-            _heartbeatCount++;
-            if (_heartbeatCount == 1 || _heartbeatCount % 60 == 0)
-            {
-                LogManager.StaticInfo($"[Server] 心跳 #{_heartbeatCount} deviceId={_deviceId} monitoring={isMonitoring} alarming={isAlarming}");
-            }
-        }
-
-        public bool IsConnected => _wsConnected;
-
-        public void Disconnect()
-        {
-            _configured = false;          // 阻止心跳等后续操作
-            _wsCts?.Cancel();             // 通知 WsLoop 退出
-            try { _ws?.Close(); } catch { /* 忽略关闭时异常 */ }
-            SetWsState(false, "disconnected");  // 立即更新 UI
-        }
-
         public void Dispose()
         {
             if (_disposed) return;
             _disposed = true;
-            _wsCts?.Cancel();
-            _wsCts?.Dispose();
-            _authEvent.Dispose();
-            try { _ws?.Close(); } catch { }
+            try
+            {
+                _events.Add(() =>
+                {
+                    _shouldReconnect = false;
+                    CancelBackoffTimer();
+                    _session?.Shutdown("dispose");
+                    _session = null;
+                });
+            }
+            catch { }
+            _events.CompleteAdding();
+            try { _loopThread?.Join(1500); } catch { }
+            _events.Dispose();
         }
 
         // ════════════════════════════════════════════════════════════
-        // WebSocket 自动重连循环（基于 WebSocketSharp 事件驱动）
+        // 事件处理（仅事件循环线程调用）
         // ════════════════════════════════════════════════════════════
 
-        private void StartWsLoop()
+        private void OnConnect(string url, string key, string did, string dname)
         {
-            _wsCts?.Cancel();
-            _wsCts = new CancellationTokenSource();
-            var token = _wsCts.Token;
-
-            _wsThread = new Thread(() => WsLoop(token))
+            if (string.IsNullOrWhiteSpace(url))
             {
-                IsBackground = true,
-                Name = "VG_WsLoop"
-            };
-            _wsThread.Start();
+                LogManager.StaticInfo("[Server] Configure: ServerUrl 为空，静默不启动");
+                _shouldReconnect = false;
+                CancelBackoffTimer();
+                _session?.Shutdown("reconfigure-empty");
+                _session = null;
+                SetState(WsState.Disconnected);
+                return;
+            }
+
+            if (url == _serverUrl && key == _apiKey && did == _deviceId && dname == _deviceName
+                && _state == WsState.Connected)
+            {
+                LogManager.StaticInfo("[Server] Configure: 参数未变且已连接，跳过");
+                return;
+            }
+
+            _serverUrl = url;
+            _apiKey = key;
+            _deviceId = did;
+            _deviceName = dname;
+            _shouldReconnect = true;
+            _attempt = 0;
+
+            CancelBackoffTimer();
+            _session?.Shutdown("reconfigure");
+            _session = null;
+
+            LogManager.StaticInfo($"[Server] connect → {_serverUrl} deviceId={_deviceId}");
+            StartNewSession();
         }
 
-        private void WsLoop(CancellationToken token)
+        private void OnDisconnect()
         {
-            int attempt = 0;
+            LogManager.StaticInfo("[Server] disconnect 用户主动断开");
+            _shouldReconnect = false;
+            CancelBackoffTimer();
+            _session?.Shutdown("user-close");
+            _session = null;
+            SetState(WsState.Disconnected);
+        }
 
-            while (!token.IsCancellationRequested)
+        private void OnWsOpened(Session s)
+        {
+            if (s != _session) return;
+            LogManager.StaticInfo("[Server] WS OnOpen → 发送认证");
+            s.SendJson(new Dictionary<string, object>
             {
-                _authCompleted = false;
-                _authEvent.Reset();
+                ["type"] = "auth",
+                ["apiKey"] = _apiKey,
+                ["role"] = "windows",
+                ["deviceId"] = _deviceId,
+                ["deviceName"] = _deviceName,
+            });
+        }
 
-                string wsUrl = _serverUrl
-                    .Replace("https://", "wss://")
-                    .Replace("http://",  "ws://");
-
-                LogManager.StaticInfo($"[Server] WS 连接尝试: 第{attempt + 1}次 URL={wsUrl}/ws 上次断开原因={_lastDisconnectReason}");
-
-                try
-                {
-                    SetWsState(false, "connecting");
-
-                    _ws?.Close();
-                    _ws = new WebSocket(wsUrl + "/ws");
-
-                    _ws.OnOpen += (sender, e) =>
-                    {
-                        // 连接建立，发送认证
-                        var authMsg = new Dictionary<string, object>
-                        {
-                            ["type"]       = "auth",
-                            ["apiKey"]     = _apiKey,
-                            ["role"]       = "windows",
-                            ["deviceId"]   = _deviceId,
-                            ["deviceName"] = _deviceName,
-                        };
-                        LogManager.StaticInfo($"[Server] WS OnOpen，发送认证 deviceId={_deviceId}");
-                        _ws.Send(SimpleJson.ToJson(authMsg));
-                    };
-
-                    _ws.OnMessage += (sender, e) =>
-                    {
-                        HandleWsMessage(e.Data);
-                    };
-
-                    _ws.OnClose += (sender, e) =>
-                    {
-                        if (_disposed) return;
-                        _lastDisconnectReason = GetCloseCodeReason(e.Code);
-                        _lastDisconnectWasClean = e.WasClean;
-
-                        // 根据 wasClean 和 code 判断断开原因
-                        string disconnectType;
-                        if (e.WasClean && e.Code == 1000) disconnectType = "客户端正常关闭";
-                        else if (e.WasClean && e.Code == 1001) disconnectType = "服务器正常关闭";
-                        else if (!e.WasClean && e.Code == 1006) disconnectType = "网络中断或服务器崩溃";
-                        else if (!e.WasClean) disconnectType = "异常断开";
-                        else disconnectType = "未知原因";
-                        LogManager.StaticWarn($"[Server] WS OnClose: {disconnectType} code={e.Code}({GetCloseCodeReason(e.Code)}) wasClean={e.WasClean}");
-                        SetWsState(false, "disconnected");
-                    };
-
-                    _ws.OnError += (sender, e) =>
-                    {
-                        if (_disposed) return;
-                        string msg = e.Message ?? "unknown";
-                        string detail = "";
-                        string disconnectType = "网络错误";
-                        // 根据错误消息模式匹配更详细的解释
-                        if (msg.Contains("Unable to connect")) {
-                            detail = " - 无法连接到服务器 (检查网络/服务器地址)";
-                            disconnectType = "服务器不可达";
-                        }
-                        else if (msg.Contains("timeout")) {
-                            detail = " - 连接超时 (服务器无响应)";
-                            disconnectType = "连接超时";
-                        }
-                        else if (msg.Contains("refused")) {
-                            detail = " - 连接被拒绝 (服务器未启动/端口错误)";
-                            disconnectType = "连接被拒绝";
-                        }
-                        else if (msg.Contains("isn't established") || msg.Contains("has been closed")) {
-                            detail = " - 连接已断开 (正常重连流程)";
-                            disconnectType = "连接已断开";
-                        }
-                        // 更新断开原因用于下次重连日志
-                        _lastDisconnectReason = disconnectType;
-                        // 连接已断开时的 OnError 是正常重连流程，降级为 Info
-                        if (detail == "" || detail.Contains("已断开"))
-                            LogManager.StaticInfo($"[Server] WS OnError: {msg}{detail}");
-                        else
-                            LogManager.StaticWarn($"[Server] WS OnError: {msg}{detail}");
-                        SetWsState(false, "disconnected");
-                    };
-
-                    // 启动连接
-                    _ws.Connect();
-
-                    // 等待认证完成
-                    while (!_authCompleted && !token.IsCancellationRequested)
-                    {
-                        if (_disposed) return;
-                        try { if (_authEvent.Wait(500)) break; }
-                        catch (ObjectDisposedException) { return; }
-                    }
-
-                    if (token.IsCancellationRequested) break;
-
-                    if (!_authSuccess)
-                    {
-                        int waitSec = BackoffSeconds[Math.Min(attempt, BackoffSeconds.Length - 1)];
-                        LogManager.StaticWarn($"[Server] WS 认证失败，{waitSec}s 后重连...");
-                        token.WaitHandle.WaitOne(TimeSpan.FromSeconds(waitSec));
-                        attempt++;
-                        continue;
-                    }
-
-                    SetWsState(true, "connected");
-                    attempt = 0;
-                    _heartbeatCount = 0;
-                    LogManager.StaticInfo($"[Server] WS 已连接 deviceId={_deviceId} 重试计数已重置");
-
-                    // 保持线程存活直到连接断开或取消
-                    while (!token.IsCancellationRequested && _ws != null && _ws.IsAlive)
-                    {
-                        if (_disposed) break;
-                        try { if (_authEvent.Wait(500)) { _authEvent.Reset(); _authCompleted = false; } }
-                        catch (ObjectDisposedException) { break; }
-                    }
-                }
-                catch (OperationCanceledException) { /* 主动取消，正常退出 */ }
-                catch (Exception ex)
-                {
-                    LogManager.StaticWarn($"[Server] WS 异常: {ex.Message}");
-                    SetWsState(false, "disconnected");
-
-                    if (!token.IsCancellationRequested)
-                    {
-                        int waitSec = BackoffSeconds[Math.Min(attempt, BackoffSeconds.Length - 1)];
-                        LogManager.StaticInfo($"[Server] {waitSec}s 后重连...");
-                        token.WaitHandle.WaitOne(TimeSpan.FromSeconds(waitSec));
-                        attempt++;
-                    }
-                }
+        private void OnAuthResult(Session s, bool success, string reason)
+        {
+            if (s != _session) return;
+            if (success)
+            {
+                LogManager.StaticInfo("[Server] WS 认证成功");
+                _attempt = 0;
+                SetState(WsState.Connected);
+                s.StartHeartbeat();
+            }
+            else
+            {
+                LogManager.StaticWarn($"[Server] WS 认证失败: {reason}");
+                SetState(WsState.AuthFailed);
+                s.Shutdown("auth-failed");
+                _session = null;
+                if (_shouldReconnect) ScheduleReconnect();
             }
         }
 
-        private void HandleWsMessage(string json)
+        private void OnWsFailed(Session s, ushort code, string reason)
         {
-            try
-            {
-                var d = SimpleJson.ParseDict(json);
-                string type = SimpleJson.GetString(d, "type");
+            if (s != _session) return;
+            LogManager.StaticWarn($"[Server] WS 失败 code={code} reason={reason}");
+            s.Shutdown("failed");
+            _session = null;
+            SetState(WsState.Disconnected);
+            if (_shouldReconnect) ScheduleReconnect();
+        }
 
-                if (type == "auth-result")
+        private void OnGhostDetected(Session s)
+        {
+            if (s != _session) return;
+            LogManager.StaticWarn("[Server] 幽灵检测触发，关闭连接");
+            s.Shutdown("ghost");
+            _session = null;
+            SetState(WsState.Disconnected);
+            if (_shouldReconnect) ScheduleReconnect();
+        }
+
+        private void OnKicked(Session s, string reason)
+        {
+            if (s != _session) return;
+            LogManager.StaticWarn($"[Server] WS 被踢: {reason}");
+            s.Shutdown("kicked");
+            _session = null;
+            SetState(WsState.Disconnected);
+            if (_shouldReconnect) ScheduleReconnect();
+        }
+
+        private void StartNewSession()
+        {
+            CancelBackoffTimer();
+            SetState(WsState.Connecting);
+            string wsUrl = _serverUrl.Replace("https://", "wss://").Replace("http://", "ws://") + "/ws";
+            LogManager.StaticInfo($"[Server] 启动新会话 attempt={_attempt + 1} url={wsUrl}");
+            var s = new Session(this, wsUrl);
+            _session = s;
+            s.Start();
+        }
+
+        private void ScheduleReconnect()
+        {
+            if (!_shouldReconnect) return;
+            int waitSec = BackoffSeconds[Math.Min(_attempt, BackoffSeconds.Length - 1)];
+            _attempt++;
+            LogManager.StaticInfo($"[Server] {waitSec}s 后重连（第 {_attempt} 次）");
+            CancelBackoffTimer();
+            _backoffTimer = new Timer(_ =>
+            {
+                Post(() =>
                 {
-                    _authSuccess = d.TryGetValue("success", out object sv) && sv is bool b && b;
-                    if (!_authSuccess)
-                    {
-                        string reason = SimpleJson.GetString(d, "reason", "unknown");
-                        LogManager.StaticWarn($"[Server] WS 认证失败: {reason}");
-                        SetWsState(false, "disconnected");
-                    }
-                    _authCompleted = true;
-                    _authEvent.Set();
+                    if (_shouldReconnect && _state != WsState.Connected && _state != WsState.Connecting)
+                        StartNewSession();
+                });
+            }, null, waitSec * 1000, Timeout.Infinite);
+        }
+
+        private void CancelBackoffTimer()
+        {
+            _backoffTimer?.Dispose();
+            _backoffTimer = null;
+        }
+
+        private void SetState(WsState newState)
+        {
+            if (_state == newState) return;
+            _state = newState;
+            string name;
+            switch (newState)
+            {
+                case WsState.Connected: name = "connected"; break;
+                case WsState.Connecting: name = "connecting"; break;
+                default: name = "disconnected"; break;
+            }
+            LogManager.StaticInfo($"[Server] 状态 → {name} deviceId={_deviceId}");
+            try { ConnectionStateChanged?.Invoke(this, name); } catch { }
+        }
+
+        // ════════════════════════════════════════════════════════════
+        // Session — 每次连接一个实例，彻底隔离
+        // ════════════════════════════════════════════════════════════
+
+        private sealed class Session
+        {
+            private readonly ServerPushService _parent;
+            private readonly string _wsUrl;
+            private WebSocket _ws;
+            private readonly object _sendLock = new object();
+            private Thread _heartbeatThread;
+            private Thread _authTimeoutThread;
+            private readonly CancellationTokenSource _cts = new CancellationTokenSource();
+            private long _lastMessageAtTicks = DateTime.UtcNow.Ticks;
+            private volatile bool _shutdown;
+
+            public Session(ServerPushService parent, string wsUrl)
+            {
+                _parent = parent;
+                _wsUrl = wsUrl;
+            }
+
+            public void Start()
+            {
+                _ws = new WebSocket(_wsUrl);
+                _ws.OnOpen += (_, __) =>
+                {
+                    if (_shutdown) return;
+                    Interlocked.Exchange(ref _lastMessageAtTicks, DateTime.UtcNow.Ticks);
+                    _parent.Post(() => _parent.OnWsOpened(this));
+                };
+                _ws.OnMessage += (_, e) =>
+                {
+                    if (_shutdown) return;
+                    Interlocked.Exchange(ref _lastMessageAtTicks, DateTime.UtcNow.Ticks);
+                    HandleMessage(e.Data);
+                };
+                _ws.OnClose += (_, e) =>
+                {
+                    if (_shutdown) return;
+                    _parent.Post(() => _parent.OnWsFailed(this, e.Code, $"closed:{e.Reason}"));
+                };
+                _ws.OnError += (_, e) =>
+                {
+                    if (_shutdown) return;
+                    _parent.Post(() => _parent.OnWsFailed(this, 0, $"error:{e.Message}"));
+                };
+
+                try { _ws.Connect(); }
+                catch (Exception ex)
+                {
+                    _parent.Post(() => _parent.OnWsFailed(this, 0, $"connect-ex:{ex.Message}"));
                     return;
                 }
 
-                if (type == "command")
+                // 认证超时看门狗
+                var token = _cts.Token;
+                _authTimeoutThread = new Thread(() =>
                 {
-                    string cmd = SimpleJson.GetString(d, "command");
-                    if (!string.IsNullOrEmpty(cmd))
-                        CommandReceived?.Invoke(this, cmd);
-                }
-                else if (type == "set-config")
+                    try
+                    {
+                        if (token.WaitHandle.WaitOne(AUTH_TIMEOUT_MS)) return;
+                        if (_shutdown) return;
+                        _parent.Post(() =>
+                        {
+                            if (_parent._session == this && _parent._state != WsState.Connected && !_shutdown)
+                                _parent.OnWsFailed(this, 0, "auth-timeout");
+                        });
+                    }
+                    catch { }
+                })
+                { IsBackground = true, Name = "VG_AuthTimeout" };
+                _authTimeoutThread.Start();
+            }
+
+            public void StartHeartbeat()
+            {
+                if (_shutdown) return;
+                Interlocked.Exchange(ref _lastMessageAtTicks, DateTime.UtcNow.Ticks);
+                var token = _cts.Token;
+                _heartbeatThread = new Thread(() => HeartbeatLoop(token))
                 {
-                    string key = SimpleJson.GetString(d, "key");
-                    string val = SimpleJson.GetString(d, "value");
-                    if (!string.IsNullOrEmpty(key))
-                        SetConfigReceived?.Invoke(this, new KeyValuePair<string, string>(key, val));
-                }
-                else if (type == "request-screenshot")
+                    IsBackground = true,
+                    Name = "VG_Heartbeat"
+                };
+                _heartbeatThread.Start();
+            }
+
+            private void HeartbeatLoop(CancellationToken token)
+            {
+                while (!token.IsCancellationRequested && !_shutdown)
                 {
-                    string alertId = SimpleJson.GetString(d, "alertId");
-                    if (!string.IsNullOrEmpty(alertId))
-                        Task.Run(() => SendScreenshotData(alertId));   // 异步，不阻塞 WS 接收线程
+                    if (token.WaitHandle.WaitOne(HEARTBEAT_INTERVAL_MS)) return;
+                    if (_shutdown) return;
+
+                    // 幽灵检测：只看 lastMessageAt，心跳不自我喂食
+                    long last = Interlocked.Read(ref _lastMessageAtTicks);
+                    long silentMs = (DateTime.UtcNow.Ticks - last) / TimeSpan.TicksPerMillisecond;
+                    if (silentMs > GHOST_THRESHOLD_MS)
+                    {
+                        _parent.Post(() => _parent.OnGhostDetected(this));
+                        return;
+                    }
+
+                    bool isMonitoring, isAlarming, isReady;
+                    int cooldown;
+                    float confidence;
+                    string targets;
+                    lock (_parent._hbParamsLock)
+                    {
+                        isMonitoring = _parent._hbIsMonitoring;
+                        isAlarming = _parent._hbIsAlarming;
+                        isReady = _parent._hbIsReady;
+                        cooldown = _parent._hbCooldown;
+                        confidence = _parent._hbConfidence;
+                        targets = _parent._hbTargets;
+                    }
+
+                    SendJson(new Dictionary<string, object>
+                    {
+                        ["type"] = "heartbeat",
+                        ["deviceId"] = _parent._deviceId,
+                        ["isMonitoring"] = isMonitoring,
+                        ["isAlarming"] = isAlarming,
+                        ["isReady"] = isReady,
+                        ["cooldown"] = cooldown,
+                        ["confidence"] = confidence,
+                        ["targets"] = targets,
+                    });
+                    // 注意：发送心跳后绝不更新 _lastMessageAtTicks
                 }
             }
-            catch { }
-        }
 
-        /// <summary>
-        /// 发送命令回执（command-ack）给服务器，服务器再转发给 Android 端。
-        /// </summary>
-        public void SendCommandAck(string command, bool success, string reason = "")
-        {
-            if (!_configured || !_wsConnected || _ws == null) return;
-            var msg = new Dictionary<string, object>
+            private void HandleMessage(string json)
             {
-                ["type"]    = "command-ack",
-                ["command"] = command,
-                ["success"] = success,
-                ["reason"]  = reason ?? "",
-            };
-            if (!WsSendJson(msg))
-                LogManager.StaticWarn($"[Server] 命令确认发送失败 deviceId={_deviceId} command={command}");
-        }
-
-        // ── WS 辅助 ─────────────────────────────────────────────────
-
-        /// <returns>true=发送成功，false=发送失败（连接已断开或超时）</returns>
-        private bool WsSendJson(Dictionary<string, object> msg)
-        {
-            lock (_sendLock)
-            {
-                if (_ws == null || !_ws.IsAlive) return false;
-                var json = SimpleJson.ToJson(msg);
                 try
                 {
-                    // WebSocketSharp 的 Send 是同步的，CPU 高负载时可能长时间阻塞
-                    // 使用 Task.Run + Wait 模拟 5s 超时，避免心跳线程被卡死
-                    var task = Task.Run(() => _ws.Send(json));
-                    if (task.Wait(SEND_TIMEOUT_MS))
-                        return true; // 发送成功
-                    // 超时不立即断连，由连续失败计数决定是否触发重连
-                    LogManager.StaticWarn($"[Server] WS 发送超时({SEND_TIMEOUT_MS}ms) deviceId={_deviceId}");
-                    return false;
+                    var d = SimpleJson.ParseDict(json);
+                    string type = SimpleJson.GetString(d, "type");
+                    switch (type)
+                    {
+                        case "auth-result":
+                        {
+                            bool success = d.TryGetValue("success", out object sv) && sv is bool b && b;
+                            string reason = SimpleJson.GetString(d, "reason", "");
+                            _parent.Post(() => _parent.OnAuthResult(this, success, reason));
+                            break;
+                        }
+                        case "kicked":
+                        {
+                            string reason = SimpleJson.GetString(d, "reason", "duplicate");
+                            _parent.Post(() => _parent.OnKicked(this, reason));
+                            break;
+                        }
+                        case "command":
+                        {
+                            string cmd = SimpleJson.GetString(d, "command");
+                            if (!string.IsNullOrEmpty(cmd))
+                                try { _parent.CommandReceived?.Invoke(_parent, cmd); } catch { }
+                            break;
+                        }
+                        case "set-config":
+                        {
+                            string key = SimpleJson.GetString(d, "key");
+                            string val = SimpleJson.GetString(d, "value");
+                            if (!string.IsNullOrEmpty(key))
+                                try { _parent.SetConfigReceived?.Invoke(_parent, new KeyValuePair<string, string>(key, val)); } catch { }
+                            break;
+                        }
+                        case "request-screenshot":
+                        {
+                            string alertId = SimpleJson.GetString(d, "alertId");
+                            if (!string.IsNullOrEmpty(alertId))
+                                Task.Run(() => _parent.SendScreenshotData(alertId));
+                            break;
+                        }
+                    }
                 }
-                catch (Exception ex)
+                catch { }
+            }
+
+            public bool SendJson(Dictionary<string, object> msg)
+            {
+                if (_shutdown) return false;
+                string json;
+                try { json = SimpleJson.ToJson(msg); }
+                catch { return false; }
+
+                lock (_sendLock)
                 {
-                    LogManager.StaticWarn($"[Server] WS 发送异常: {ex.Message} deviceId={_deviceId}");
-                    return false;
+                    if (_ws == null || !_ws.IsAlive) return false;
+                    try
+                    {
+                        var task = Task.Run(() => _ws.Send(json));
+                        if (task.Wait(SEND_TIMEOUT_MS)) return true;
+                        LogManager.StaticWarn($"[Server] WS 发送超时({SEND_TIMEOUT_MS}ms)");
+                        return false;
+                    }
+                    catch (Exception ex)
+                    {
+                        LogManager.StaticWarn($"[Server] WS 发送异常: {ex.Message}");
+                        return false;
+                    }
                 }
             }
-        }
 
-        private void SetWsState(bool connected, string stateName)
-        {
-            if (_wsConnected == connected) return; // 状态未变，跳过（避免 OnError+OnClose 重复触发）
-            _wsConnected = connected;
-            var ts = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ");
-            LogManager.StaticInfo($"[Server][{ts}] WS 状态 → {stateName} deviceId={_deviceId ?? "n/a"}");
-            try { ConnectionStateChanged?.Invoke(this, stateName); }
-            catch { }
+            public void Shutdown(string reason)
+            {
+                if (_shutdown) return;
+                _shutdown = true;
+                try { _cts.Cancel(); } catch { }
+                try { _ws?.Close(); } catch { }
+                LogManager.StaticInfo($"[Server] Session shutdown: {reason}");
+            }
         }
 
         // ── 序列化辅助 ───────────────────────────────────────────────
 
         private static List<Dictionary<string, object>> BuildDetectionsPayload(
-            System.Collections.Generic.IReadOnlyList<Detection> detections)
+            IReadOnlyList<Detection> detections)
         {
             var list = new List<Dictionary<string, object>>();
             if (detections == null) return list;
@@ -584,9 +608,9 @@ namespace VisionGuard.Services
             {
                 list.Add(new Dictionary<string, object>
                 {
-                    ["label"]      = d.Label ?? "",
+                    ["label"] = d.Label ?? "",
                     ["confidence"] = Math.Round(d.Confidence, 4),
-                    ["bbox"]       = new Dictionary<string, object>
+                    ["bbox"] = new Dictionary<string, object>
                     {
                         ["x"] = (int)d.BoundingBox.X,
                         ["y"] = (int)d.BoundingBox.Y,

@@ -28,8 +28,9 @@ export const config = {
   /** WS 认证超时 (毫秒) */
   wsAuthTimeoutMs: 5000,
 
-  /** 设备离线判定时间 (毫秒)，默认 90 秒 (心跳间隔 30s × 3) */
-  deviceOfflineMs: 90000,
+  /** 设备离线判定 / 幽灵清理阈值 (毫秒)。超过此时间无消息则终止连接并标记离线。
+   *  Windows 心跳 15s, Android 心跳 20s + ping 20s, 取 75s 为安全阈值。 */
+  deviceOfflineMs: 75_000,
 
   /** 每设备最大报警记录数 (循环缓冲) */
   maxAlertsPerDevice: 200,

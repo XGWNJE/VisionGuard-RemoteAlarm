@@ -12,7 +12,7 @@ import { WebSocketServer } from 'ws';
 import { config, validateConfig } from './config';
 import alertRouter from './routes/alert';
 import screenshotRouter from './routes/screenshot';
-import { handleConnection } from './services/ConnectionManager';
+import { handleConnection, initPing } from './services/ConnectionManager';
 import { startCleanupTimer } from './services/ScreenshotCleanup';
 
 // ── 加载 .env (简易实现，无需 dotenv 依赖) ─────────────────
@@ -58,6 +58,7 @@ const server = http.createServer(app);
 
 const wss = new WebSocketServer({ server });
 wss.on('connection', handleConnection);
+initPing();
 
 // ── 启动 ──────────────────────────────────────────────────
 

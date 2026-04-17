@@ -47,14 +47,14 @@ class AlertForegroundService : LifecycleService() {
     private val binder = AlertServiceBinder()
 
     // ── 对外状态 ──────────────────────────────────────────────
-    private val _connectionState = MutableStateFlow(WsState.DISCONNECTED)
-    val connectionState: StateFlow<WsState> = _connectionState
+    // 连接状态直接暴露 wsClient 的 StateFlow，避免双状态源
+    val connectionState: StateFlow<WsState> get() = wsClient.connectionState
 
     private val _alerts = MutableStateFlow<List<AlertMessage>>(emptyList())
     val alerts: StateFlow<List<AlertMessage>> = _alerts
 
-    private val _devices = MutableStateFlow<List<DeviceInfo>>(emptyList())
-    val devices: StateFlow<List<DeviceInfo>> = _devices
+    // 设备列表直接转发 wsClient.onDeviceList
+    val devices: StateFlow<List<DeviceInfo>> get() = wsClient.onDeviceList
 
     private val _commandAck = MutableSharedFlow<Pair<String, Boolean>>(extraBufferCapacity = 8)
     val commandAck: SharedFlow<Pair<String, Boolean>> = _commandAck
@@ -66,6 +66,7 @@ class AlertForegroundService : LifecycleService() {
     private val notifIdCounter = AtomicInteger(1000)
     private var wakeLock: PowerManager.WakeLock? = null
     private lateinit var screenshotCache: ScreenshotCache
+    private lateinit var networkMonitor: NetworkMonitor  // 网络状态监听
 
     // ── 设备参数缓存（记录每台设备最后下发的值）──────────────
     private val deviceConfigs = mutableMapOf<String, DeviceConfig>()
@@ -85,6 +86,11 @@ class AlertForegroundService : LifecycleService() {
         NotificationHelper.createChannels(this)
         settingsRepo = SettingsRepository(applicationContext)
         screenshotCache = ScreenshotCache(applicationContext)
+        networkMonitor = NetworkMonitor(applicationContext)
+
+        // 注入网络检测器：心跳循环中主动检测网络可达性
+        val cm = getSystemService(CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+        wsClient.networkChecker = { cm.activeNetwork != null }
 
         // 启动前台通知
         startForeground(
@@ -92,23 +98,20 @@ class AlertForegroundService : LifecycleService() {
             NotificationHelper.buildForegroundNotification(this, "正在连接...")
         )
 
-        // 获取 WakeLock 防止后台时被 Doze 挂起（10分钟超时兜底，防止崩溃时泄漏）
+        // 获取 WakeLock 防止后台时被 Doze 挂起
         wakeLock = (getSystemService(POWER_SERVICE) as PowerManager).newWakeLock(
             PowerManager.PARTIAL_WAKE_LOCK,
             "VisionGuard:WebSocket"
         )
-        wakeLock?.acquire(10 * 60 * 1000L)
+        wakeLock?.acquire(30 * 60 * 1000L)
 
-        // 订阅 WS 状态 → 更新前台通知
+        // 订阅 WS 状态 → 更新前台通知 + 续期 WakeLock
         lifecycleScope.launch {
             wsClient.connectionState.collect { state ->
-                _connectionState.value = state
-                // BUG 5 FIX：断连时清空设备列表（onFailure/onClosed 不经过 disconnect()）
-                if (state == WsState.DISCONNECTED || state == WsState.AUTH_FAILED) {
-                    if (_devices.value.isNotEmpty()) {
-                        Log.i(TAG, "WS 状态 → $state，清空设备列表")
-                        _devices.value = emptyList()
-                    }
+                // 每次状态变化时续期 WakeLock（防止 30 分钟超时释放）
+                wakeLock?.let { wl ->
+                    if (wl.isHeld) wl.release()
+                    wl.acquire(30 * 60 * 1000L)
                 }
                 val stateText = when (state) {
                     WsState.CONNECTED    -> "已连接"
@@ -132,13 +135,12 @@ class AlertForegroundService : LifecycleService() {
             }
         }
 
-        // 订阅设备列表
+        // 订阅设备列表（仅日志，实际状态由 wsClient.onDeviceList 代理）
         lifecycleScope.launch {
             wsClient.onDeviceList.collect { devices ->
                 Log.d(TAG, "设备列表更新: ${devices.size} 台 [${
                     devices.joinToString { "${it.deviceName}(${if (it.online) "在" else "离"})" }
                 }]")
-                _devices.value = devices
             }
         }
 
@@ -165,6 +167,17 @@ class AlertForegroundService : LifecycleService() {
             val deviceId = settingsRepo.ensureDeviceId()
             wsClient.connect(AppConstants.SERVER_URL, AppConstants.API_KEY, deviceId)
         }
+
+        networkMonitor.register(
+            onAvailable = {
+                Log.i(TAG, "网络恢复 → 尝试立即重连")
+                wsClient.onNetworkAvailable()
+            },
+            onLost = {
+                Log.i(TAG, "网络断开 → 通知 WS 客户端")
+                wsClient.onNetworkLost()
+            }
+        )
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -179,16 +192,11 @@ class AlertForegroundService : LifecycleService() {
 
     override fun onDestroy() {
         super.onDestroy()
+        networkMonitor.unregister()  // 注销网络监听
         wsClient.disconnect()
         wakeLock?.let {
             if (it.isHeld) it.release()
         }
-    }
-
-    override fun onTrimMemory(level: Int) {
-        super.onTrimMemory(level)
-        Log.w(TAG, "onTrimMemory: level=$level")
-        // 仅在内存严重不足时打印日志，不主动断开连接
     }
 
     // ── 公开 API ──────────────────────────────────────────────

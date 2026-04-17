@@ -33,22 +33,6 @@ export interface AlertRecord {
 
 // ── WebSocket 消息 ─────────────────────────────────────────
 
-/** 所有 WS 消息共有的 type 字段 */
-export type WsMessageType =
-  | 'auth'
-  | 'auth-result'
-  | 'heartbeat'
-  | 'heartbeat-android'
-  | 'alert'
-  | 'device-list'
-  | 'command'
-  | 'command-ack'
-  | 'set-config'
-  | 'request-screenshot'
-  | 'screenshot-data'
-  | 'disconnect-reason'
-  | 'session-info';
-
 /** 客户端 → 服务器：认证 */
 export interface WsAuthMessage {
   type: 'auth';
@@ -58,14 +42,7 @@ export interface WsAuthMessage {
   deviceName: string;
 }
 
-/** 服务器 → 客户端：认证结果 */
-export interface WsAuthResult {
-  type: 'auth-result';
-  success: boolean;
-  reason?: string;
-}
-
-/** Windows → 服务器：心跳 (每 5 秒) */
+/** Windows → 服务器：心跳 (每 15 秒) */
 export interface WsHeartbeat {
   type: 'heartbeat';
   deviceId: string;
@@ -77,7 +54,7 @@ export interface WsHeartbeat {
   targets?: string;
 }
 
-/** Android → 服务器：心跳 (每 30 秒，补充 ping 帧的可靠性) */
+/** Android → 服务器：心跳 (每 20 秒，补充 OkHttp ping 帧) */
 export interface WsHeartbeatAndroid {
   type: 'heartbeat-android';
   deviceId: string;
@@ -92,12 +69,6 @@ export interface WsAlertPush {
   timestamp: string;
   detections: Detection[];
   screenshotUrl: string;
-}
-
-/** 服务器 → Android：设备列表推送 */
-export interface WsDeviceList {
-  type: 'device-list';
-  devices: DeviceStatus[];
 }
 
 export interface DeviceStatus {

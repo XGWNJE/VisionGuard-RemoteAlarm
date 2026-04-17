@@ -304,9 +304,6 @@
     <Compile Include="UI\FlatRoundButton.cs">
       <SubType>Component</SubType>
     </Compile>
-    <Compile Include="UI\OwnerDrawListBox.cs">
-      <SubType>Component</SubType>
-    </Compile>
     <Compile Include="UI\HiddenScrollPanel.cs">
       <SubType>Component</SubType>
     </Compile>

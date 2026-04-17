@@ -32,10 +32,8 @@ namespace VisionGuard
         private MenuButton _menuCapture, _menuParams, _menuTargets, _menuServer;
         private MenuButton[] _allMenuButtons;
 
-        // ── 预览 / 日志 ──────────────────────────────────────────────
-        private SplitContainer        _leftSplit;
+        // ── 预览 ──────────────────────────────────────────────────
         private DetectionOverlayPanel _overlayPanel;
-        private OwnerDrawListBox      _lstLog;
 
         // ── 页面容器 ────────────────────────────────────────────────
         private Panel _pageContainer;
@@ -99,7 +97,7 @@ namespace VisionGuard
 
             _alertService   = new AlertService();
             _monitorService = new MonitorService(_alertService);
-            _log            = new LogManager(_lstLog);
+            _log            = new LogManager();
             _serverPushService = new ServerPushService();
 
             _alertService.AlertTriggered   += OnAlertTriggered;
@@ -124,7 +122,6 @@ namespace VisionGuard
             LoadSettings();
             UpdateControlState(started: false);
             ShowPage(_pageCapture, _menuCapture);
-            ApplySplitterRatio();
 
             _log.Info("VisionGuard 已就绪，请选择捕获区域或目标窗口后点击「开始」。");
         }
@@ -149,7 +146,6 @@ namespace VisionGuard
             int h = (int)(640 * _scaleFactor);
             Size = new Size(w, h);
 
-            ApplySplitterRatio();
             _overlayPanel?.Invalidate();
         }
 
@@ -318,20 +314,6 @@ namespace VisionGuard
                 if (_targetWindow != null) return true;                          // 窗口捕获模式
                 return _screenRegion.Width >= 32 && _screenRegion.Height >= 32; // 屏幕区域模式
             }
-        }
-
-        private void ApplySplitterRatio()
-        {
-            if (_leftSplit == null) return;
-            try
-            {
-                int h = _leftSplit.Height;
-                int target = (int)(h * 0.60);
-                target = Math.Max(_leftSplit.Panel1MinSize,
-                         Math.Min(h - _leftSplit.Panel2MinSize, target));
-                _leftSplit.SplitterDistance = target;
-            }
-            catch { /* 尺寸不合法时静默忽略 */ }
         }
 
         /// <summary>安全解析 TextBox 值（用于 BuildConfig）。</summary>

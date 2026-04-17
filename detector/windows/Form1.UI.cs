@@ -70,24 +70,6 @@ namespace VisionGuard
             // ── 预览面板 ─────────────────────────────────────────────
             _overlayPanel = new DetectionOverlayPanel { Dock = DockStyle.Fill };
 
-            // ── 日志面板 ─────────────────────────────────────────────
-            _lstLog = new OwnerDrawListBox { Dock = DockStyle.Fill };
-            _lstLog.Font = new Font("Consolas", Font.SizeInPoints, FontStyle.Regular, GraphicsUnit.Point);
-            var logContainer = new Panel { Dock = DockStyle.Fill, MinimumSize = new Size(0, 60) };
-            logContainer.Controls.Add(_lstLog);
-
-            // ── 左侧分割：上70%预览 / 下30%日志 ─────────────────────
-            _leftSplit = new SplitContainer
-            {
-                Dock          = DockStyle.Fill,
-                Orientation   = Orientation.Horizontal,
-                Panel1MinSize = 100,
-                Panel2MinSize = 60,
-                BackColor     = Color.FromArgb(25, 25, 25)
-            };
-            _leftSplit.Panel1.Controls.Add(_overlayPanel);
-            _leftSplit.Panel2.Controls.Add(logContainer);
-
             // ── 页面容器（4个页面，Dock.Fill 叠加，切换 Visible）───
             _pageCapture = new Panel { Dock = DockStyle.Fill, BackColor = Color.FromArgb(32, 32, 32), Visible = true };
             _pageParams  = new Panel { Dock = DockStyle.Fill, BackColor = Color.FromArgb(32, 32, 32), Visible = false };
@@ -100,7 +82,7 @@ namespace VisionGuard
             _pageContainer.Controls.Add(_pageTargets);
             _pageContainer.Controls.Add(_pageServer);
 
-            // ── 内容区：左边预览+日志 + 右边页面 ─────────────────────
+            // ── 内容区：左边预览 + 右边页面 ───────────────────────
             var contentLayout = new TableLayoutPanel
             {
                 Dock        = DockStyle.Fill,
@@ -110,7 +92,7 @@ namespace VisionGuard
             contentLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 58F));
             contentLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 42F));
             contentLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-            contentLayout.Controls.Add(_leftSplit,     0, 0);
+            contentLayout.Controls.Add(_overlayPanel,  0, 0);
             contentLayout.Controls.Add(_pageContainer, 1, 0);
 
             // ── 组装 ─────────────────────────────────────────────────
@@ -361,9 +343,6 @@ namespace VisionGuard
 
             // 目标页事件
             _classPicker.SelectionChanged += (s, e) => { /* 可在此实时更新状态显示 */ };
-
-            // 分割比例
-            Shown  += (s, e) => ApplySplitterRatio();
         }
 
         // ════════════════════════════════════════════════════════════

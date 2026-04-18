@@ -316,6 +316,7 @@
     <Compile Include="Utils\LogManager.cs" />
     <Compile Include="Utils\SettingsStore.cs" />
     <Compile Include="Utils\SimpleJson.cs" />
+    <Compile Include="Utils\SnapshotRenderer.cs" />
     <EmbeddedResource Include="Properties\Resources.resx">
       <Generator>ResXFileCodeGenerator</Generator>
       <LastGenOutput>Resources.Designer.cs</LastGenOutput>

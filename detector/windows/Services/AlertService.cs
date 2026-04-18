@@ -10,7 +10,9 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
+using VisionGuard.Capture;
 using VisionGuard.Models;
+using VisionGuard.Utils;
 
 namespace VisionGuard.Services
 {
@@ -34,9 +36,9 @@ namespace VisionGuard.Services
 
         /// <summary>
         /// 评估本帧检测结果，满足冷却条件时触发报警。
-        /// 报警元数据（截图等）由调用方通过 AlertTriggered 事件传递。
+        /// 报警触发时重新截取一帧新鲜画面并绘制检测框后保存。
         /// </summary>
-        public void Evaluate(List<Detection> detections, Bitmap frame, MonitorConfig config)
+        public void Evaluate(List<Detection> detections, MonitorConfig config)
         {
             if (detections == null || detections.Count == 0) return;
 
@@ -51,9 +53,29 @@ namespace VisionGuard.Services
                 _lastAlertTime = now;
             }
 
-            Bitmap snapshot;
-            try { snapshot = (Bitmap)frame.Clone(); }
-            catch { snapshot = null; }
+            // 重新截取一帧新鲜画面（与报警时刻同步）
+            Bitmap snapshot = null;
+            try
+            {
+                if (config.CaptureMode == CaptureMode.WindowHandle
+                    && config.TargetWindowHandle != IntPtr.Zero)
+                {
+                    snapshot = WindowCapturer.CaptureWindow(
+                        config.TargetWindowHandle, config.WindowSubRegion);
+                }
+                else
+                {
+                    snapshot = ScreenCapturer.CaptureRegion(config.CaptureRegion);
+                }
+
+                // 在截图上绘制检测框
+                SnapshotRenderer.DrawDetections(snapshot, detections);
+            }
+            catch
+            {
+                snapshot?.Dispose();
+                snapshot = null;
+            }
 
             // 生成 alertId，用于本地截图文件名和服务端追踪
             string alertId = Guid.NewGuid().ToString();

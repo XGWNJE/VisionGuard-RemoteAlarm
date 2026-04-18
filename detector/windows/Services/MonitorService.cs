@@ -143,8 +143,8 @@ namespace VisionGuard.Services
                     cfg.IouThreshold,
                     cfg.WatchedClasses);
 
-                // 5. 报警评估（传 frame 供 AlertService clone 快照）
-                _alertService.Evaluate(detections, frame, cfg);
+                // 5. 报警评估（AlertService 自行截取新帧用于快照）
+                _alertService.Evaluate(detections, cfg);
 
                 // 6. 通知 UI
                 FrameProcessed?.Invoke(this, new FrameResultEventArgs(

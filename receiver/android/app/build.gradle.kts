@@ -24,8 +24,8 @@ android {
         applicationId = "com.xgwnje.visionguard_android"
         minSdk = 28
         targetSdk = 36
-        versionCode = 3102
-        versionName = "3.1.2"
+        versionCode = 3200
+        versionName = "3.2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

@@ -34,6 +34,9 @@ export const config = {
 
   /** 每设备最大报警记录数 (循环缓冲) */
   maxAlertsPerDevice: 200,
+
+  /** 客户端最低版本要求 (语义化版本)。低于此版本的连接将在认证时被拒绝。 */
+  minClientVersion: '3.2.1',
 } as const;
 
 // 启动时检查 API_KEY 是否配置

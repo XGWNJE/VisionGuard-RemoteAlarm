@@ -8,6 +8,7 @@
 using System;
 using System.Drawing;
 using System.IO;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using VisionGuard.Capture;
 using VisionGuard.Models;
@@ -122,6 +123,12 @@ namespace VisionGuard
             LoadSettings();
             UpdateControlState(started: false);
             ShowPage(_pageCapture, _menuCapture);
+
+            // 启动时同步 NTP 时钟
+            Task.Run(async () =>
+            {
+                await Utils.NtpSync.SyncAsync();
+            });
 
             _log.Info("VisionGuard 已就绪，请选择捕获区域或目标窗口后点击「开始」。");
         }

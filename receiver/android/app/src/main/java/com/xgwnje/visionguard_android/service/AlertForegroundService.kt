@@ -244,6 +244,7 @@ class AlertForegroundService : LifecycleService() {
             this@AlertForegroundService, alert, notifId, null
         )
         nm.notify(notifId, notif)
+        alert.notifiedAt = com.xgwnje.visionguard_android.util.NtpSync.now()
         // 更新分组摘要通知（20 台设备同时告警时防止通知栏泛滥）
         nm.notify(NotificationHelper.ALERT_SUMMARY_NOTIF_ID,
             NotificationHelper.buildAlertSummaryNotification(this@AlertForegroundService))

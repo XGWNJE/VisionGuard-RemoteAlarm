@@ -16,13 +16,16 @@ namespace VisionGuard.Models
         public IReadOnlyList<Detection> Detections { get; }
         // 调用方负责 Dispose，AlertService 不持有引用
         public Bitmap Snapshot { get; }
+        public Dictionary<string, long> Timings { get; }
 
-        public AlertEvent(string alertId, IReadOnlyList<Detection> detections, Bitmap snapshot)
+        public AlertEvent(string alertId, IReadOnlyList<Detection> detections, Bitmap snapshot,
+                          Dictionary<string, long> timings)
         {
-            AlertId   = alertId;
-            Timestamp = DateTime.Now;
+            AlertId    = alertId;
+            Timestamp  = DateTime.Now;
             Detections = detections;
             Snapshot   = snapshot;
+            Timings    = timings ?? new Dictionary<string, long>();
         }
     }
 }

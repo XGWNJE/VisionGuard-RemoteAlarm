@@ -113,6 +113,11 @@ class WebSocketClient {
         .readTimeout(30, TimeUnit.SECONDS)
         .build()
 
+    /** 网络切换时清除旧连接池，避免 OkHttp 复用已失效的 TCP socket */
+    private fun evictConnectionPool() {
+        try { http.connectionPool.evictAll() } catch (_: Exception) {}
+    }
+
     init {
         startEventLoop()
     }
@@ -239,6 +244,7 @@ class WebSocketClient {
             else -> {}
         }
 
+        evictConnectionPool()
         pendingBackoffJob?.cancel()
         pendingBackoffJob = null
         attempt = 0
@@ -306,6 +312,7 @@ class WebSocketClient {
         Log.i(TAG, "默认网络断开 → 主动关闭当前会话，等待网络恢复后重连")
         session?.shutdown("network-lost")
         session = null
+        evictConnectionPool()
         pendingBackoffJob?.cancel()
         pendingBackoffJob = null
         _state.value = WsState.DISCONNECTED
@@ -474,6 +481,7 @@ class WebSocketClient {
                 }
                 "alert" -> {
                     val alert = gson.fromJson(text, AlertMessage::class.java)
+                    alert.receivedAt = com.xgwnje.visionguard_android.util.NtpSync.now()
                     scope.launch { _onAlert.emit(alert) }
                 }
                 "device-list" -> {

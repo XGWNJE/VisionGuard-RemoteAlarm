@@ -12,6 +12,7 @@ using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
 using System.Linq;
+using System.Net.NetworkInformation;
 using System.Threading;
 using System.Threading.Tasks;
 using WebSocketSharp;
@@ -73,6 +74,29 @@ namespace VisionGuard.Services
         {
             _loopThread = new Thread(EventLoop) { IsBackground = true, Name = "VG_WsEventLoop" };
             _loopThread.Start();
+
+            // 监听系统网络变化 → 立即重连（避免等 60s 幽灵超时）
+            NetworkChange.NetworkAddressChanged += OnSystemNetworkChanged;
+        }
+
+        private void OnSystemNetworkChanged(object sender, EventArgs e)
+        {
+            if (_disposed || !_shouldReconnect) return;
+            // 检查是否有可用网络
+            bool hasNetwork;
+            try { hasNetwork = NetworkInterface.GetIsNetworkAvailable(); }
+            catch { hasNetwork = false; }
+
+            if (hasNetwork)
+            {
+                LogManager.StaticInfo("[Server] 系统网络变化 → 立即重连");
+                Post(OnNetworkChanged);
+            }
+            else
+            {
+                LogManager.StaticInfo("[Server] 系统网络断开 → 关闭当前会话");
+                Post(OnNetworkLost);
+            }
         }
 
         private void Post(Action action)
@@ -132,6 +156,8 @@ namespace VisionGuard.Services
                 ["deviceName"] = _deviceName,
                 ["timestamp"] = alert.Timestamp.ToString("o"),
                 ["detections"] = BuildDetectionsPayload(alert.Detections),
+                ["timings"] = alert.Timings,
+                ["wsSentAt"] = NtpSync.UtcNow.ToString("o"),
             };
             if (!s.SendJson(msg))
                 LogManager.StaticWarn($"[Server] 报警发送失败 alertId={alert.AlertId}");
@@ -145,6 +171,36 @@ namespace VisionGuard.Services
                 ["command"] = command,
                 ["success"] = success,
                 ["reason"] = reason ?? "",
+            });
+        }
+
+        public void SendHeartbeatNow()
+        {
+            var s = _session;
+            if (s == null || _state != WsState.Connected) return;
+            bool isMonitoring, isAlarming, isReady;
+            int cooldown;
+            float confidence;
+            string targets;
+            lock (_hbParamsLock)
+            {
+                isMonitoring = _hbIsMonitoring;
+                isAlarming = _hbIsAlarming;
+                isReady = _hbIsReady;
+                cooldown = _hbCooldown;
+                confidence = _hbConfidence;
+                targets = _hbTargets;
+            }
+            s.SendJson(new Dictionary<string, object>
+            {
+                ["type"] = "heartbeat",
+                ["deviceId"] = _deviceId,
+                ["isMonitoring"] = isMonitoring,
+                ["isAlarming"] = isAlarming,
+                ["isReady"] = isReady,
+                ["cooldown"] = cooldown,
+                ["confidence"] = confidence,
+                ["targets"] = targets,
             });
         }
 
@@ -203,6 +259,7 @@ namespace VisionGuard.Services
         {
             if (_disposed) return;
             _disposed = true;
+            NetworkChange.NetworkAddressChanged -= OnSystemNetworkChanged;
             try
             {
                 _events.Add(() =>
@@ -268,6 +325,38 @@ namespace VisionGuard.Services
             SetState(WsState.Disconnected);
         }
 
+        private void OnNetworkChanged()
+        {
+            if (!_shouldReconnect || string.IsNullOrWhiteSpace(_serverUrl)) return;
+
+            switch (_state)
+            {
+                case WsState.Connected:
+                    LogManager.StaticInfo("[Server] 网络变化且已连接 → 断开旧连接立即重连");
+                    _session?.Shutdown("network-changed");
+                    _session = null;
+                    break;
+                case WsState.Connecting:
+                    LogManager.StaticInfo("[Server] 网络变化且正在连接 → 中断后重试");
+                    _session?.Shutdown("network-changed");
+                    _session = null;
+                    break;
+            }
+            CancelBackoffTimer();
+            _attempt = 0;
+            StartNewSession();
+        }
+
+        private void OnNetworkLost()
+        {
+            if (_session == null) return;
+            LogManager.StaticInfo("[Server] 网络断开 → 关闭当前会话等待恢复");
+            _session?.Shutdown("network-lost");
+            _session = null;
+            CancelBackoffTimer();
+            SetState(WsState.Disconnected);
+        }
+
         private void OnWsOpened(Session s)
         {
             if (s != _session) return;
@@ -279,6 +368,7 @@ namespace VisionGuard.Services
                 ["role"] = "windows",
                 ["deviceId"] = _deviceId,
                 ["deviceName"] = _deviceName,
+                ["version"] = "3.2.1",
             });
         }
 

@@ -40,6 +40,7 @@ export interface WsAuthMessage {
   role: 'windows' | 'android';
   deviceId: string;
   deviceName: string;
+  version?: string;
 }
 
 /** Windows → 服务器：心跳 (每 15 秒) */
@@ -69,6 +70,10 @@ export interface WsAlertPush {
   timestamp: string;
   detections: Detection[];
   screenshotUrl: string;
+  timings?: Record<string, number>;
+  wsSentAt?: string;
+  serverReceivedAt?: string;
+  serverRelayedAt?: string;
 }
 
 export interface DeviceStatus {

@@ -26,7 +26,13 @@ data class AlertMessage(
     val timestamp: String,           // ISO 8601
     val detections: List<Detection>,
     val screenshotUrl: String = "",  // 已废弃，保留兼容（Windows 不再发此字段）
-    val screenshotData: ScreenshotData? = null
+    val screenshotData: ScreenshotData? = null,
+    val timings: Map<String, Long>? = null,
+    val wsSentAt: String? = null,
+    val serverReceivedAt: String? = null,
+    val serverRelayedAt: String? = null,
+    @Transient var receivedAt: Long = 0L,
+    @Transient var notifiedAt: Long = 0L
 )
 
 data class ScreenshotData(

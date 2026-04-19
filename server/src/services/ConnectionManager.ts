@@ -27,6 +27,19 @@ interface AndroidSession {
 }
 const androidSessions = new Map<string, AndroidSession>();
 
+function meetsMinVersion(clientVersion: string | undefined, minVersion: string): boolean {
+  if (!clientVersion) return false;
+  const parse = (v: string) => v.split('.').map(Number);
+  const client = parse(clientVersion);
+  const min = parse(minVersion);
+  for (let i = 0; i < min.length; i++) {
+    const c = client[i] ?? 0;
+    if (c > min[i]) return true;
+    if (c < min[i]) return false;
+  }
+  return true;
+}
+
 // 追踪待处理的截图请求：alertId → androidDeviceId（用于 screenshot-data 回传路由）
 const pendingScreenshotRequests = new Map<string, Set<string>>();
 
@@ -178,7 +191,10 @@ export function handleConnection(ws: WebSocket): void {
         if (role === 'android') handleHeartbeatAndroid(msg as WsHeartbeatAndroid);
         break;
       case 'alert':
-        if (role === 'windows') broadcastAlert(msg as WsAlertPush);
+        if (role === 'windows') {
+          (msg as WsAlertPush).serverReceivedAt = new Date().toISOString();
+          broadcastAlert(msg as WsAlertPush);
+        }
         break;
       case 'command':
         if (role === 'android') handleCommand(ws, msg as WsCommand);
@@ -212,23 +228,30 @@ export function handleConnection(ws: WebSocket): void {
     const ts = new Date().toISOString();
     const codeName = getCloseCodeName(code);
     if (deviceId) {
-      if (role === 'windows' && windowsClients.has(deviceId)) {
-        windowsClients.delete(deviceId);
-        console.log(`[ws][${ts}] Windows 断开: ${deviceId} code=${code}(${codeName}) Windows在线=${windowsClients.size}`);
-        scheduleBroadcast();
-      } else if (role === 'android' && androidClients.has(deviceId)) {
-        // 推断 Android 断开原因（Close Code 映射）
-        const endReason = closeCodeToSessionEndReason(code, deviceId);
-        const session = androidSessions.get(deviceId);
-        if (session) {
-          session.lastSessionEndReason = endReason;
-          session.lastSessionDurationMs = Date.now() - session.connectedAt;
+      if (role === 'windows') {
+        const existing = windowsClients.get(deviceId);
+        if (existing && existing.ws === ws) {
+          windowsClients.delete(deviceId);
+          console.log(`[ws][${ts}] Windows 断开: ${deviceId} code=${code}(${codeName}) Windows在线=${windowsClients.size}`);
+          scheduleBroadcast();
+        } else {
+          console.log(`[ws][${ts}] Windows 旧连接关闭（已被新连接替代）: ${deviceId} code=${code}(${codeName})`);
         }
-        androidClients.delete(deviceId);
-        console.log(`[ws][${ts}] Android 断开: ${deviceId} code=${code}(${codeName}) 推断原因=${endReason} Android在线=${androidClients.size}`);
-        scheduleBroadcast();
-      } else {
-        console.log(`[ws][${ts}] 关闭事件（已由其他路径清理）: ${deviceId} code=${code}(${codeName})`);
+      } else if (role === 'android') {
+        const existing = androidClients.get(deviceId);
+        if (existing && existing.ws === ws) {
+          const endReason = closeCodeToSessionEndReason(code, deviceId);
+          const session = androidSessions.get(deviceId);
+          if (session) {
+            session.lastSessionEndReason = endReason;
+            session.lastSessionDurationMs = Date.now() - session.connectedAt;
+          }
+          androidClients.delete(deviceId);
+          console.log(`[ws][${ts}] Android 断开: ${deviceId} code=${code}(${codeName}) 推断原因=${endReason} Android在线=${androidClients.size}`);
+          scheduleBroadcast();
+        } else {
+          console.log(`[ws][${ts}] Android 旧连接关闭（已被新连接替代）: ${deviceId} code=${code}(${codeName})`);
+        }
       }
     } else {
       console.log(`[ws][${ts}] 未认证连接关闭 code=${code}(${codeName})`);
@@ -247,6 +270,7 @@ export function handleConnection(ws: WebSocket): void {
  * 向所有 Android 客户端广播报警
  */
 export function broadcastAlert(alert: WsAlertPush): void {
+  alert.serverRelayedAt = new Date().toISOString();
   const result = broadcastToAndroid(alert, `alert:${alert.alertId}`);
   console.log(`[ws][${new Date().toISOString()}] 报警广播: alertId=${alert.alertId} 发送成功=${result.success} 失败=${result.failed}`);
 }
@@ -265,6 +289,13 @@ function handleAuth(
   if (!validateApiKey(msg.apiKey)) {
     console.log(`[ws][${ts}] 认证失败: API Key 无效 role=${msg.role} deviceId=${msg.deviceId}`);
     sendJson(ws, { type: 'auth-result', success: false, reason: 'invalid api key' });
+    ws.close();
+    return;
+  }
+
+  if (!meetsMinVersion(msg.version, config.minClientVersion)) {
+    console.log(`[ws][${ts}] 认证失败: 版本过低 role=${msg.role} deviceId=${msg.deviceId} version=${msg.version ?? 'unknown'} min=${config.minClientVersion}`);
+    sendJson(ws, { type: 'auth-result', success: false, reason: `version too old, require >= ${config.minClientVersion}` });
     ws.close();
     return;
   }

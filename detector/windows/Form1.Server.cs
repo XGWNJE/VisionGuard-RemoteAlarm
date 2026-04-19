@@ -230,12 +230,31 @@ namespace VisionGuard
                             }
                             break;
                     }
+                    _serverPushService.UpdateHeartbeatParams(
+                        isMonitoring: _monitorService.IsStarted,
+                        isAlarming:   _alertService.IsAlarming,
+                        isReady:      IsRegionReady,
+                        cooldown:     ParseInt(_txtCooldown.Text, 1, 300, 5),
+                        confidence:   _trkThreshold.Value / 100f,
+                        targets:      string.Join(",", _classPicker.SelectedClasses));
+                    _serverPushService.SendHeartbeatNow();
                 }));
             };
 
             _serverPushService.SetConfigReceived += (s, kv) =>
             {
-                BeginInvoke(new Action(() => ApplyRemoteConfig(kv.Key, kv.Value)));
+                BeginInvoke(new Action(() =>
+                {
+                    ApplyRemoteConfig(kv.Key, kv.Value);
+                    _serverPushService.UpdateHeartbeatParams(
+                        isMonitoring: _monitorService.IsStarted,
+                        isAlarming:   _alertService.IsAlarming,
+                        isReady:      IsRegionReady,
+                        cooldown:     ParseInt(_txtCooldown.Text, 1, 300, 5),
+                        confidence:   _trkThreshold.Value / 100f,
+                        targets:      string.Join(",", _classPicker.SelectedClasses));
+                    _serverPushService.SendHeartbeatNow();
+                }));
             };
         }
 

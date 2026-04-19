@@ -115,6 +115,8 @@ namespace VisionGuard.Services
 
             try
             {
+                var sw = Stopwatch.StartNew();
+
                 // 1. 截图（根据捕获模式选择方式）
                 if (cfg.CaptureMode == Models.CaptureMode.WindowHandle
                     && cfg.TargetWindowHandle != IntPtr.Zero)
@@ -125,26 +127,38 @@ namespace VisionGuard.Services
                 {
                     frame = ScreenCapturer.CaptureRegion(cfg.CaptureRegion);
                 }
+                long captureMs = sw.ElapsedMilliseconds;
 
                 // 2. 预处理（内部 resize + 转张量）
+                sw.Restart();
                 float[] tensor = ImagePreprocessor.ToTensor(frame);
+                long preprocessMs = sw.ElapsedMilliseconds;
 
-                // 3. 推理（计时）
-                var sw = Stopwatch.StartNew();
+                // 3. 推理
+                sw.Restart();
                 float[] rawOutput = _engine.Run(tensor, ImagePreprocessor.InputShape);
-                sw.Stop();
                 long inferMs = sw.ElapsedMilliseconds;
 
-                // 4. 解析
+                // 4. 解析（使用实际帧尺寸，避免窗口缩放导致坐标偏移）
+                sw.Restart();
+                var frameRegion = new Rectangle(0, 0, frame.Width, frame.Height);
                 List<Detection> detections = YoloOutputParser.Parse(
                     rawOutput,
-                    cfg.CaptureRegion,
+                    frameRegion,
                     cfg.ConfidenceThreshold,
                     cfg.IouThreshold,
                     cfg.WatchedClasses);
+                long parseMs = sw.ElapsedMilliseconds;
 
-                // 5. 报警评估（AlertService 自行截取新帧用于快照）
-                _alertService.Evaluate(detections, cfg);
+                // 5. 报警评估（使用推理帧绘制检测框，确保坐标匹配）
+                var timings = new Dictionary<string, long>
+                {
+                    ["captureMs"]     = captureMs,
+                    ["preprocessMs"]  = preprocessMs,
+                    ["inferMs"]       = inferMs,
+                    ["parseMs"]       = parseMs,
+                };
+                _alertService.Evaluate(detections, cfg, timings, frame);
 
                 // 6. 通知 UI
                 FrameProcessed?.Invoke(this, new FrameResultEventArgs(

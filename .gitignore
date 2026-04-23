@@ -57,4 +57,8 @@ Desktop.ini
 .claude/
 
 # ===== 设计文件（大文件，按需跟踪）=====
-.apk 
+*.apk
+*.psd
+
+# ===== release 文件夹（构建产物）=====
+**/release/ 

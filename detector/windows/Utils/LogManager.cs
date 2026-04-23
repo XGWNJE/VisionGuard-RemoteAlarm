@@ -15,13 +15,7 @@ namespace VisionGuard.Utils
     /// </summary>
     public class LogManager
     {
-        // ── 静态路由（供后台线程调用）───────────────────────────────
-        private static LogManager _instance;
-
-        public LogManager()
-        {
-            _instance = this;   // 注册全局实例
-        }
+        public LogManager() { }
 
         /// <summary>后台线程安全：INFO</summary>
         public static void StaticInfo(string message)

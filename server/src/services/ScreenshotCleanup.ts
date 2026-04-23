@@ -19,13 +19,6 @@ export function startCleanupTimer(): void {
   timer = setInterval(cleanup, config.cleanupIntervalMs);
 }
 
-export function stopCleanupTimer(): void {
-  if (timer) {
-    clearInterval(timer);
-    timer = null;
-  }
-}
-
 function cleanup(): void {
   const dir = config.screenshotDir;
   if (!fs.existsSync(dir)) return;

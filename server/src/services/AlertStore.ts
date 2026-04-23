@@ -25,20 +25,3 @@ export function addAlert(record: AlertRecord): void {
   }
 }
 
-/**
- * 获取某设备的所有报警记录
- */
-export function getAlerts(deviceId: string): AlertRecord[] {
-  return store.get(deviceId) || [];
-}
-
-/**
- * 按 alertId 查找单条记录
- */
-export function getAlert(alertId: string): AlertRecord | undefined {
-  for (const list of store.values()) {
-    const found = list.find(r => r.alertId === alertId);
-    if (found) return found;
-  }
-  return undefined;
-}

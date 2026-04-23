@@ -54,7 +54,7 @@ namespace VisionGuard.Inference
 
             using (IDisposableReadOnlyCollection<DisposableNamedOnnxValue> outputs = _session.Run(inputs))
             {
-                // output0 形状 [1, 84, 2100]，展平后直接返回
+                // output0 形状 [1, 300, 6]（YOLO26 已内置 NMS），展平后直接返回
                 // 1.1.0 的 IDisposableReadOnlyCollection 无索引器，用 First()
                 var outTensor = outputs.First().AsTensor<float>();
                 return outTensor.ToArray();

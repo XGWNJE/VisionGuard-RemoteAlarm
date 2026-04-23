@@ -192,6 +192,28 @@ namespace VisionGuard
             _txtFps     = AddParamRow(_pageParams, "FPS：",    1, 5, 2, PadX, RowH, ref y);
             y += RowGap;
             _txtThreads = AddParamRow(_pageParams, "线程数：", 1, 8, 2, PadX, RowH, ref y);
+            y += RowGap + fh / 2;
+
+            // 模型选择
+            _pageParams.Controls.Add(MakeTitle("模型选择", PadX, ref y, fh));
+
+            _cmbModel = new ComboBox
+            {
+                Left = PadX, Top = y, Height = RowH,
+                Width = _pageParams.ClientSize.Width - PadX * 2,
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                BackColor = Color.FromArgb(45, 45, 45),
+                ForeColor = Color.LightGray,
+                FlatStyle = FlatStyle.Flat,
+                Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top
+            };
+            _cmbModel.Items.AddRange(new object[] { "YOLO26n (轻量 ~5MB)", "YOLO26s (精准 ~20MB)" });
+            _cmbModel.SelectedIndex = 0; // 默认 yolo26n
+            _cmbModel.SelectedIndexChanged += (s, e) =>
+            {
+                _selectedModel = _cmbModel.SelectedIndex == 0 ? "yolo26n" : "yolo26s";
+            };
+            _pageParams.Controls.Add(_cmbModel);
         }
 
         // ════════════════════════════════════════════════════════════

@@ -1,6 +1,6 @@
 # VisionGuard — Claude Code 项目指南
 
-> 基于 AI 的实时监控系统。Windows 检测端通过 YOLOv5 推理，经自建服务器实时推送报警至 Android 手机。
+> 基于 AI 的实时监控系统。Windows 检测端通过 YOLO26 推理，经自建服务器实时推送报警至 Android 手机。
 
 ## 项目概览
 
@@ -8,19 +8,19 @@
 detector/windows/          server/                    receiver/android/
   (推理检测端)        ──►  VPS 中继服务器  ──►         (通知接收端)
   Windows PC(s)           Node.js / WebSocket          Android 手机
-  YOLOv5 目标检测          HTTP REST + WS               查看报警 / 远程控制
+  YOLO26 目标检测          HTTP REST + WS               查看报警 / 远程控制
 ```
 
 | 目录 | 技术栈 | 功能 |
 |---|---|---|
-| `detector/windows/` | C# / .NET Framework 4.7.2 / WinForms | 屏幕/窗口捕获 + YOLOv5 ONNX 推理 + 报警推送 |
+| `detector/windows/` | C# / .NET Framework 4.7.2 / WinForms | 屏幕/窗口捕获 + YOLO26 ONNX 推理 + 报警推送 |
 | `server/` | Node.js / TypeScript / Express / ws | 中继服务器：设备管理、报警转发、截图存储 |
 | `receiver/android/` | Kotlin / Jetpack Compose / OkHttp | 接收报警通知、查看截图、远程控制检测端 |
-| `detector/android/` | Kotlin / Jetpack Compose (脚手架) | 备用推理端（当前为空壳，预留扩展） |
+| `detector/android/` | Kotlin / Jetpack Compose / CameraX / ONNX Runtime Mobile | Android 检测端（后置摄像头 + YOLO26 推理 + 报警推送） |
 
 ## 版本管理
 
-- **当前版本**：`3.3.0`（见根目录 [VERSION](VERSION)）
+- **当前版本**：`3.3.1`（见根目录 [VERSION](VERSION)）
 - **三端版本必须严格同步**：Server `package.json`、Android `build.gradle.kts`、Windows `AssemblyInfo.cs` / `.csproj`
 - **规则文件**：[VERSION_RULES.md](VERSION_RULES.md)
 - **Commit 前缀规范**：
@@ -46,9 +46,11 @@ detector/windows/          server/                    receiver/android/
 - [Form1.Server.cs](detector/windows/Form1.Server.cs) — 服务器连接、设置持久化、远程配置
 - [Form1.UI.cs](detector/windows/Form1.UI.cs) — UI 构建：主布局、页面切换
 - [OnnxInferenceEngine.cs](detector/windows/Inference/OnnxInferenceEngine.cs) — ONNX Runtime 封装
+- [YoloOutputParser.cs](detector/windows/Inference/YoloOutputParser.cs) — YOLO26 输出解析（格式 `[1, 300, 6]`，已内置 NMS，6 = [x1, y1, x2, y2, conf, class_id]）
 
-**依赖**：Microsoft.ML.OnnxRuntime 1.1.0、websocket-sharp
-**模型**：`Assets/yolov5nu.onnx`（~10MB，YOLOv5nu，COCO 80 类）
+**依赖**：Microsoft.ML.OnnxRuntime 1.17+、websocket-sharp
+**模型**：`Assets/yolo26n.onnx`（~9.4MB，轻量）/ `Assets/yolo26s.onnx`（~37MB，精准），COCO 80 类
+**模型选择**：参数页下拉框切换 yolo26n / yolo26s
 **目标框架**：.NET Framework 4.7.2，x64
 
 ### server — 中继服务器
@@ -98,6 +100,38 @@ detector/windows/          server/                    receiver/android/
 - `SERVER_URL = "http://66.154.112.91:3000"`
 - `API_KEY = "XG-VisionGuard-2024"`
 
+### detector/android — Android 检测端
+
+**技术栈**：Kotlin 2.3.20、Jetpack Compose BOM 2026.03、CameraX 1.4.2、ONNX Runtime Mobile 1.20.0、AGP 9.1、minSdk 28 / targetSdk 36
+
+**架构**：前台 Service（`foregroundServiceType="camera"`）+ CameraX `ImageAnalysis`（无 Preview）+ ONNX Runtime Mobile 纯 CPU 推理
+
+**核心模块**：
+- `inference/OnnxInferenceEngine.kt` — ONNX Runtime Mobile 会话封装，线程数 2，默认 CPU 执行
+- `inference/YoloOutputParser.kt` — yolo26 输出解析 + NMS，支持 320×320 和 640×640 两种分辨率
+- `inference/ImagePreprocessor.kt` — `ImageProxy`/`Bitmap` → CHW RGB float 数组
+- `inference/SocWhitelist.kt` — SoC 白名单检测（骁龙 8 Gen / 天玑 9000+ / 麒麟 9000 / Exynos 2200+），决定默认分辨率 320 或 640
+- `service/MonitorService.kt` — 主监控循环：按 `intervalMs = 1000 / targetFps` 控制推理间隔（默认 2 FPS，可调范围 1–5 FPS）
+- `service/AlertService.kt` — 冷却锁判定，触发报警帧绘制与推送
+- `service/DetectorForegroundService.kt` — 前台服务：绑定 CameraX + MonitorService + ServerPushService
+- `service/ServerPushService.kt` — WS 认证、心跳、报警推送、命令接收（role: `android-detector`）
+- `data/remote/WebSocketClient.kt` — 复用 receiver 端 WS 封装，role 改为 `"android-detector"`
+- `util/SnapshotRenderer.kt` — Canvas 绘制检测框（LimeGreen 边框 + 标签）
+
+**关键文件**：
+- [计划文档](C:\Users\Administrator\.claude\plans\windows-detector-android-android-hidden-mccarthy.md) — Android 检测端完整实现方案
+- [UI 设计稿](detector/android/design/AndroidDetectorDesign.pen) — ConfigScreen + AlertFrameScreen 两屏设计
+
+**模型**：
+- `yolo26n_320.onnx` / `yolo26n_640.onnx`（~5–6MB，轻量高速）
+- `yolo26s_320.onnx` / `yolo26s_640.onnx`（~20–22MB，精度更高）
+- 全部打包至 APK assets，首次启动按用户选择 + SoC 白名单复制到 `filesDir/models/`
+
+**关键约束**：
+- 无实时预览：仅绑定 `ImageAnalysis`，不绑定 `Preview`，降低 GPU/CPU 负载
+- 报警帧暂显：检测到目标时临时显示绘制后的报警帧，3 秒后自动清空
+- FPS 限制：默认 2 FPS，可调范围 1–5 FPS，控制设备发热
+
 ## 环境配置
 
 ### Server `.env`
@@ -140,11 +174,13 @@ cd receiver/android
 
 **Windows**：
 - 框架为 .NET Framework 4.7.2（老框架），推荐用 Visual Studio 2022 打开 `detector/windows/VisionGuard.csproj`
-- 编译前确认 `.csproj` 中所有 `Content` 资源文件（`Assets/yolov5nu.onnx`、`Assets/VisionGuard.ico`、`Assets/*.png` 等）的 `CopyToOutputDirectory` 已正确设置为 `PreserveNewest`
+- 编译前确认 `.csproj` 中所有 `Content` 资源文件（`Assets/yolo26n.onnx`、`Assets/yolo26s.onnx`、`Assets/VisionGuard.ico`、`Assets/*.png` 等）的 `CopyToOutputDirectory` 已正确设置为 `PreserveNewest`
 - 若使用自动编译/CI，需确保 MSBuild 能解析 NuGet packages 路径，或预先执行 `nuget restore`
 - 生成 → 发布时，检查输出目录是否包含完整的 `Assets/` 子目录，缺失资源文件会导致运行时报错
 
 ## 通信时序
+
+### Windows 检测端 ↔ Server ↔ Android 接收端
 
 ```
 Windows                    Server                     Android
@@ -165,6 +201,27 @@ Windows                    Server                     Android
   │ ─────────────────────────> │ ─────screenshot-data────> │
 ```
 
+### Android 检测端 ↔ Server ↔ Android 接收端
+
+```
+Detector                   Server                   Receiver
+(android)                                           (android)
+  │  WS auth(role=android-detector)│                         │
+  │ ──────────────────────────────>│                         │
+  │       heartbeat(15s)           │                         │
+  │ ──────────────────────────────>│                         │
+  │                                │      device-list        │
+  │                                │ <──────────────────────>│
+  │      alert + screenshot        │                         │
+  │ ───────POST /api/alert────────>│                         │
+  │                                │        alert(WS)        │
+  │                                │ <──────────────────────>│
+  │                                │   command / set-config  │
+  │ <──────────────────────────────│ <───────────────────────│
+  │       command-ack              │                         │
+  │ ──────────────────────────────>│ ───────────────────────>│
+```
+
 ## 开发注意事项
 
 1. **版本号同步**：任何功能提交必须同时更新三端版本号。使用根目录 `VERSION` 文件作为唯一来源。
@@ -173,3 +230,7 @@ Windows                    Server                     Android
 4. **NTP 同步**：Windows 端启动时同步 NTP 时钟，确保报警时间戳准确。
 5. **网络切换**：Android 端监听网络变化，切换网络时立即重建 WS 连接（清除 OkHttp 连接池）。
 6. **幽灵检测**：Server 75s 无消息视为离线；Android 45s 无消息主动断开重连。
+7. **Android 检测端模型打包**：四个模型（n_320、n_640、s_320、s_640）全部打包到 APK assets，应用首次启动时按用户选择 + SoC 白名单复制对应模型到 `filesDir/models/`。
+8. **分辨率策略**：默认 320×320 纯 CPU 运行；SocWhitelist 检测到高端 SoC（骁龙 8 Gen / 天玑 9000+ / 麒麟 9000 / Exynos 2200+）自动切换至 640×640。
+9. **FPS 与热管理**：默认 2 FPS，可调范围 1–5 FPS；无 Preview 绑定以降低 GPU 负载；持续监控时注意设备发热。
+10. **Android 14+ 前台服务**：`DetectorForegroundService` 需声明 `foregroundServiceType="camera|remoteMessaging"`，`startForeground()` 必须在 Service 启动后 5 秒内调用。

@@ -50,6 +50,7 @@ namespace VisionGuard
         private TextBox         _txtFps, _txtThreads, _txtCooldown;
         private DarkSlider      _trkThreshold;
         private Label           _lblThreshold;
+        private ComboBox        _cmbModel;
 
         // ── 目标页 控件 ─────────────────────────────────────────────
         private CocoClassPickerControl _classPicker;
@@ -79,8 +80,11 @@ namespace VisionGuard
         private Rectangle     _screenRegion;   // ScreenRegion 模式下的坐标
         private Rectangle     _windowSubRegion; // WindowHandle 子区域
 
+        // ── 模型选择 ────────────────────────────────────────────────
+        private string _selectedModel = "yolo26n"; // "yolo26n" | "yolo26s"
+
         private string ModelPath => Path.Combine(
-            AppDomain.CurrentDomain.BaseDirectory, "Assets", "yolov5nu.onnx");
+            AppDomain.CurrentDomain.BaseDirectory, "Assets", $"{_selectedModel}.onnx");
 
         // ════════════════════════════════════════════════════════════
         // 构造

@@ -40,6 +40,6 @@ dist/
 
 
 # ===== 模型文件说明 =====
-# Assets/yolov5nu.onnx 需要手动下载，见 readme.md 中的说明
+# Assets/yolo26n.onnx / yolo26s.onnx 通过 ultralytics 导出，见 Assets/ASSETS_README.md
+# yolo26n.onnx ~9.4MB，yolo26s.onnx ~36MB
 # 如果文件超过 50MB 请使用 Git LFS：git lfs track "*.onnx"
-# 目前 yolov5nu.onnx ~10MB，可直接提交，无需 LFS

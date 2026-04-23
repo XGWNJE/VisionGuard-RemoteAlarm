@@ -55,7 +55,7 @@ namespace VisionGuard.Services
         }
 
         /// <summary>
-        /// 启动监控。modelPath = yolov5nu.onnx 完整路径。
+        /// 启动监控。modelPath = yolo26n.onnx 或 yolo26s.onnx 完整路径。
         /// </summary>
         public void Start(string modelPath, MonitorConfig config)
         {

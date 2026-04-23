@@ -74,7 +74,7 @@
 
 ```
 git clone <repo>
-# 将 yolov5nu.onnx 放入 Assets/
+# 将 yolo26n.onnx / yolo26s.onnx 放入 Assets/（导出方法见 Assets/ASSETS_README.md）
 # 用 Visual Studio 2022 打开 VisionGuard.csproj，还原 NuGet，生成即可
 ```
 

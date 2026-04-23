@@ -2,26 +2,36 @@
 
 此目录存放运行时依赖的二进制资源文件。
 
-## yolov5nu.onnx（必需）
+## yolo26n.onnx（默认）
 
-- **模型**：YOLOv5n ultralytics 版（yolov5nu），COCO 80类
-- **用途**：目标检测，本项目只过滤 class=0 (person)
+- **模型**：YOLO26n ultralytics 版，COCO 80类
+- **用途**：目标检测，轻量高速
 - **输入形状**：`[1, 3, 320, 320]` float32，CHW，RGB，归一化到 [0,1]
-- **输出形状**：`[1, 84, 2100]`（84 = 4坐标 + 80类概率，无单独 objectness）
-- **Opset**：12
-- **文件大小**：约 10.2 MB
+- **输出形状**：`[1, 300, 6]`（已内置 NMS，6 = [cx, cy, w, h, confidence, class_id]）
+- **Opset**：20
+- **文件大小**：约 9.4 MB
 
-> ⚠️ 输出格式与旧版 YOLOv5 不同：
-> - 旧版：`[1, 2100, 85]`，含 objectness 列（第5列）
-> - 本模型：`[1, 84, 2100]`，无 objectness，直接是 `[cx,cy,w,h,cls0..79]`，需转置后解析
+## yolo26s.onnx（可选）
 
-### 重新导出（如需更换）
+- **模型**：YOLO26s ultralytics 版，COCO 80类
+- **用途**：目标检测，精度更高
+- **输入形状**：`[1, 3, 320, 320]` float32，CHW，RGB，归一化到 [0,1]
+- **输出形状**：`[1, 300, 6]`（已内置 NMS）
+- **Opset**：20
+- **文件大小**：约 36.4 MB
+
+> ⚠️ 与旧版 YOLOv5nu 输出格式不同：
+> - 旧版：`[1, 84, 2100]` 原始输出，需手动 NMS
+> - 新模型：`[1, 300, 6]` 已内置 NMS，直接输出过滤后的检测框
+
+### 重新导出
 
 ```bash
 pip install ultralytics onnxslim
 python -c "
 from ultralytics import YOLO
-YOLO('yolov5nu.pt').export(format='onnx', imgsz=320, opset=12, simplify=True)
+YOLO('yolo26n.pt').export(format='onnx', imgsz=320, simplify=True)
+YOLO('yolo26s.pt').export(format='onnx', imgsz=320, simplify=True)
 "
 ```
 

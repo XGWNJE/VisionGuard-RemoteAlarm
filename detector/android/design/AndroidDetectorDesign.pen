@@ -1,0 +1,1408 @@
+{
+  "version": "2.11",
+  "children": [
+    {
+      "type": "frame",
+      "id": "p0B1z",
+      "x": 900,
+      "y": 0,
+      "name": "ConfigScreen",
+      "width": 393,
+      "height": 852,
+      "fill": "$bg-dark",
+      "layout": "vertical",
+      "alignItems": "center",
+      "children": [
+        {
+          "type": "frame",
+          "id": "wZ7bm",
+          "name": "StatusBar",
+          "width": "fill_container",
+          "height": 62,
+          "padding": [
+            0,
+            24
+          ],
+          "justifyContent": "space_between",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "yIKij",
+              "name": "timeLabel",
+              "fill": "$text-primary",
+              "content": "09:41",
+              "fontFamily": "$font-body",
+              "fontSize": 17,
+              "fontWeight": "600"
+            },
+            {
+              "type": "frame",
+              "id": "8R0sC",
+              "name": "statusIcons",
+              "gap": 6,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon_font",
+                  "id": "hgSHi",
+                  "name": "signalIcon",
+                  "width": 16,
+                  "height": 16,
+                  "iconFontName": "signal",
+                  "iconFontFamily": "lucide",
+                  "fill": "$text-primary"
+                },
+                {
+                  "type": "icon_font",
+                  "id": "u6KOB",
+                  "name": "wifiIcon",
+                  "width": 16,
+                  "height": 16,
+                  "iconFontName": "wifi",
+                  "iconFontFamily": "lucide",
+                  "fill": "$text-primary"
+                },
+                {
+                  "type": "icon_font",
+                  "id": "Hr6BZ",
+                  "name": "batteryIcon",
+                  "width": 16,
+                  "height": 16,
+                  "iconFontName": "battery-full",
+                  "iconFontFamily": "lucide",
+                  "fill": "$text-primary"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "9W3in",
+          "name": "headerArea",
+          "width": "fill_container",
+          "padding": [
+            16,
+            16,
+            12,
+            16
+          ],
+          "justifyContent": "space_between",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "wdIrP",
+              "name": "headerTitle",
+              "fill": "$text-primary",
+              "content": "VisionGuard",
+              "fontFamily": "Inter",
+              "fontSize": 28,
+              "fontWeight": "700"
+            },
+            {
+              "type": "text",
+              "id": "5PZZx",
+              "name": "headerSubtitle",
+              "fill": "$text-muted",
+              "content": "检测端",
+              "fontFamily": "Inter",
+              "fontSize": 14
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "d026t",
+          "name": "scrollWrapper",
+          "clip": true,
+          "width": "fill_container",
+          "height": 1083,
+          "layout": "vertical",
+          "gap": 20,
+          "padding": [
+            0,
+            16,
+            24,
+            16
+          ],
+          "children": [
+            {
+              "type": "frame",
+              "id": "zuX6x",
+              "name": "statusCard",
+              "width": "fill_container",
+              "fill": "$surface-container",
+              "cornerRadius": "$radius-lg",
+              "layout": "vertical",
+              "gap": 12,
+              "padding": 16,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "y8Glw",
+                  "name": "statusHeader",
+                  "width": "fill_container",
+                  "justifyContent": "space_between",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "0mbSY",
+                      "name": "statusTitle",
+                      "fill": "$text-primary",
+                      "content": "运行状态",
+                      "fontFamily": "Inter",
+                      "fontSize": 16,
+                      "fontWeight": "600"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "r8qHz",
+                      "name": "statusBadge",
+                      "fill": "$accent-green",
+                      "cornerRadius": "$radius-xl",
+                      "gap": 6,
+                      "padding": [
+                        6,
+                        10
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "ellipse",
+                          "id": "iiDXb",
+                          "name": "statusDot",
+                          "fill": "#FFFFFF",
+                          "width": 8,
+                          "height": 8
+                        },
+                        {
+                          "type": "text",
+                          "id": "bZrAn",
+                          "name": "statusText",
+                          "fill": "#FFFFFF",
+                          "content": "在线",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "600"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "GEbqu",
+                  "name": "statusGrid",
+                  "width": "fill_container",
+                  "gap": 12,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "hJZRy",
+                      "name": "fpsItem",
+                      "width": "fill_container",
+                      "layout": "vertical",
+                      "gap": 4,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "lnMud",
+                          "name": "fpsValue",
+                          "fill": "$accent-blue",
+                          "content": "2.0",
+                          "fontFamily": "Inter",
+                          "fontSize": 24,
+                          "fontWeight": "700"
+                        },
+                        {
+                          "type": "text",
+                          "id": "IGTdn",
+                          "name": "fpsLabel",
+                          "fill": "$text-muted",
+                          "content": "FPS",
+                          "fontFamily": "Inter",
+                          "fontSize": 12
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "q83sh",
+                      "name": "resItem",
+                      "width": "fill_container",
+                      "layout": "vertical",
+                      "gap": 4,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "1dKoP",
+                          "name": "resValue",
+                          "fill": "$primary-color",
+                          "content": "320",
+                          "fontFamily": "Inter",
+                          "fontSize": 24,
+                          "fontWeight": "700"
+                        },
+                        {
+                          "type": "text",
+                          "id": "27D9L",
+                          "name": "resLabel",
+                          "fill": "$text-muted",
+                          "content": "分辨率",
+                          "fontFamily": "Inter",
+                          "fontSize": 12
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "YxwuM",
+                      "name": "alertItem",
+                      "width": "fill_container",
+                      "layout": "vertical",
+                      "gap": 4,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "69fZ1",
+                          "name": "alertValue",
+                          "fill": "$text-primary",
+                          "content": "--:--",
+                          "fontFamily": "Inter",
+                          "fontSize": 24,
+                          "fontWeight": "700"
+                        },
+                        {
+                          "type": "text",
+                          "id": "UHtPZ",
+                          "name": "alertLabel",
+                          "fill": "$text-muted",
+                          "content": "最近报警",
+                          "fontFamily": "Inter",
+                          "fontSize": 12
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "6MoTq",
+              "name": "controlSection",
+              "width": "fill_container",
+              "fill": "$surface-container",
+              "cornerRadius": "$radius-lg",
+              "layout": "vertical",
+              "gap": 16,
+              "padding": 20,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "ru7xR",
+                  "name": "controlLabel",
+                  "fill": "$text-primary",
+                  "content": "监控控制",
+                  "fontFamily": "Inter",
+                  "fontSize": 16,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "frame",
+                  "id": "Igpxc",
+                  "name": "toggleRow",
+                  "width": "fill_container",
+                  "gap": 16,
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "9BLij",
+                      "name": "toggleBtn",
+                      "width": 80,
+                      "height": 44,
+                      "fill": "$surface-variant",
+                      "cornerRadius": 22,
+                      "padding": 4,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "ellipse",
+                          "id": "eArWH",
+                          "name": "toggleKnob",
+                          "fill": "$outline",
+                          "width": 36,
+                          "height": 36
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "id": "yst50",
+                      "name": "toggleState",
+                      "fill": "$text-muted",
+                      "content": "已停止",
+                      "fontFamily": "Inter",
+                      "fontSize": 18,
+                      "fontWeight": "600"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "zwGVM",
+              "name": "configCard",
+              "width": "fill_container",
+              "fill": "$surface-container",
+              "cornerRadius": "$radius-lg",
+              "layout": "vertical",
+              "gap": 16,
+              "padding": 16,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "YTg7B",
+                  "name": "configTitle",
+                  "fill": "$text-primary",
+                  "content": "检测配置",
+                  "fontFamily": "Inter",
+                  "fontSize": 16,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "frame",
+                  "id": "PjbbN",
+                  "name": "confItem1",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 8,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "zwcFw",
+                      "name": "confLabel1",
+                      "fill": "$text-secondary",
+                      "content": "置信度阈值",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "500"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "xAUT5",
+                      "name": "confSlider1",
+                      "width": "fill_container",
+                      "height": 6,
+                      "fill": "$surface-variant",
+                      "cornerRadius": 3,
+                      "children": [
+                        {
+                          "type": "rectangle",
+                          "cornerRadius": 3,
+                          "id": "emcSO",
+                          "name": "confSlider1Fill",
+                          "fill": "$primary-color",
+                          "width": 140,
+                          "height": 6
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "id": "O4XRl",
+                      "name": "confVal1",
+                      "fill": "$primary-color",
+                      "content": "0.50",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "600"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "jhM1F",
+                  "name": "confItem2",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 8,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "gg20N",
+                      "name": "confLabel2",
+                      "fill": "$text-secondary",
+                      "content": "冷却时间 (秒)",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "500"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "EvD53",
+                      "name": "confInput2",
+                      "width": "fill_container",
+                      "height": 44,
+                      "fill": "$surface",
+                      "cornerRadius": "$radius-sm",
+                      "padding": 12,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "U5Alv",
+                          "name": "confInput2Text",
+                          "fill": "$text-primary",
+                          "content": "30",
+                          "fontFamily": "Inter",
+                          "fontSize": 16
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "Cnxgy",
+                  "name": "confItem3",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 8,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "wUnNb",
+                      "name": "confLabel3",
+                      "fill": "$text-secondary",
+                      "content": "目标类别 (逗号分隔)",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "500"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "9FphH",
+                      "name": "confInput3",
+                      "width": "fill_container",
+                      "height": 44,
+                      "fill": "$surface",
+                      "cornerRadius": "$radius-sm",
+                      "padding": 12,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "IgtdX",
+                          "name": "confInput3Text",
+                          "fill": "$text-primary",
+                          "content": "person, car",
+                          "fontFamily": "Inter",
+                          "fontSize": 16
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "L0xMR",
+                  "name": "confItem4",
+                  "width": "fill_container",
+                  "justifyContent": "space_between",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "p8Bye",
+                      "name": "confLabel4",
+                      "fill": "$text-secondary",
+                      "content": "目标 FPS",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "500"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "IFwa7",
+                      "name": "fpsChipGroup",
+                      "gap": 8,
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "8bls1",
+                          "name": "fpsChip1",
+                          "fill": "$surface",
+                          "cornerRadius": "$radius-xl",
+                          "padding": [
+                            8,
+                            14
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "IydUi",
+                              "name": "fpsChip1Text",
+                              "fill": "$text-secondary",
+                              "content": "1",
+                              "fontFamily": "Inter",
+                              "fontSize": 14,
+                              "fontWeight": "600"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "wxuoW",
+                          "name": "fpsChip2",
+                          "fill": "$primary-color",
+                          "cornerRadius": "$radius-xl",
+                          "padding": [
+                            8,
+                            14
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "iDstI",
+                              "name": "fpsChip2Text",
+                              "fill": "$on-primary",
+                              "content": "2",
+                              "fontFamily": "Inter",
+                              "fontSize": 14,
+                              "fontWeight": "600"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "jOX6K",
+                          "name": "fpsChip3",
+                          "fill": "$surface",
+                          "cornerRadius": "$radius-xl",
+                          "padding": [
+                            8,
+                            14
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "6zq99",
+                              "name": "fpsChip3Text",
+                              "fill": "$text-secondary",
+                              "content": "3",
+                              "fontFamily": "Inter",
+                              "fontSize": 14
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "JgvRl",
+                          "name": "fpsChip4",
+                          "fill": "$surface",
+                          "cornerRadius": "$radius-xl",
+                          "padding": [
+                            8,
+                            14
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "7gLUk",
+                              "name": "fpsChip4Text",
+                              "fill": "$text-secondary",
+                              "content": "4",
+                              "fontFamily": "Inter",
+                              "fontSize": 14
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "ZDARs",
+                          "name": "fpsChip5",
+                          "fill": "$surface",
+                          "cornerRadius": "$radius-xl",
+                          "padding": [
+                            8,
+                            14
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "Kwqvv",
+                              "name": "fpsChip5Text",
+                              "fill": "$text-secondary",
+                              "content": "5",
+                              "fontFamily": "Inter",
+                              "fontSize": 14
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "3BQtk",
+                  "name": "confItem5",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 10,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "hWoks",
+                      "name": "confLabel5",
+                      "fill": "$text-secondary",
+                      "content": "模型选择",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "500"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "eWoUm",
+                      "name": "modelRow",
+                      "width": "fill_container",
+                      "gap": 10,
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "eRIdM",
+                          "name": "modelN",
+                          "width": "fill_container",
+                          "fill": "$primary-color",
+                          "cornerRadius": "$radius-md",
+                          "gap": 8,
+                          "padding": 12,
+                          "justifyContent": "center",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon_font",
+                              "id": "e91KS",
+                              "name": "modelNIcon",
+                              "width": 16,
+                              "height": 16,
+                              "iconFontName": "zap",
+                              "iconFontFamily": "lucide",
+                              "fill": "$on-primary"
+                            },
+                            {
+                              "type": "text",
+                              "id": "iJd3L",
+                              "name": "modelNText",
+                              "fill": "$on-primary",
+                              "content": "YOLO26n (轻量)",
+                              "fontFamily": "Inter",
+                              "fontSize": 14,
+                              "fontWeight": "600"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "2ueqm",
+                          "name": "modelS",
+                          "width": "fill_container",
+                          "fill": "$surface",
+                          "cornerRadius": "$radius-md",
+                          "gap": 8,
+                          "padding": 12,
+                          "justifyContent": "center",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon_font",
+                              "id": "9tSfo",
+                              "name": "modelSIcon",
+                              "width": 16,
+                              "height": 16,
+                              "iconFontName": "cpu",
+                              "iconFontFamily": "lucide",
+                              "fill": "$text-secondary"
+                            },
+                            {
+                              "type": "text",
+                              "id": "pidPX",
+                              "name": "modelSText",
+                              "fill": "$text-secondary",
+                              "content": "YOLO26s (精准)",
+                              "fontFamily": "Inter",
+                              "fontSize": 14
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "hEdek",
+              "name": "alertSection",
+              "width": "fill_container",
+              "fill": "$surface-container",
+              "cornerRadius": "$radius-lg",
+              "layout": "vertical",
+              "gap": 12,
+              "padding": 16,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "1hLne",
+                  "name": "alertTitle",
+                  "width": "fill_container",
+                  "justifyContent": "space_between",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "UWn2k",
+                      "name": "alertTitleText",
+                      "fill": "$text-primary",
+                      "content": "报警帧预览",
+                      "fontFamily": "Inter",
+                      "fontSize": 16,
+                      "fontWeight": "600"
+                    },
+                    {
+                      "type": "text",
+                      "id": "rIsuy",
+                      "name": "alertClear",
+                      "fill": "$text-muted",
+                      "content": "3s 后清除",
+                      "fontFamily": "Inter",
+                      "fontSize": 12
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "Ltnrr",
+                  "name": "alertPlaceholder",
+                  "width": "fill_container",
+                  "height": 200,
+                  "fill": "$surface",
+                  "cornerRadius": "$radius-md",
+                  "layout": "vertical",
+                  "gap": 8,
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon_font",
+                      "id": "yGFj3",
+                      "name": "alertIcon",
+                      "width": 40,
+                      "height": 40,
+                      "iconFontName": "camera-off",
+                      "iconFontFamily": "lucide",
+                      "fill": "$text-muted"
+                    },
+                    {
+                      "type": "text",
+                      "id": "vjWWt",
+                      "name": "alertHint",
+                      "fill": "$text-muted",
+                      "content": "检测到目标时显示报警帧",
+                      "fontFamily": "Inter",
+                      "fontSize": 14
+                    },
+                    {
+                      "type": "text",
+                      "id": "A6RAl",
+                      "name": "alertSubHint",
+                      "fill": "$text-muted",
+                      "content": "平时不显示实时画面以节省性能",
+                      "fontFamily": "Inter",
+                      "fontSize": 12
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "id": "DXgwc",
+              "name": "footerNote",
+              "fill": "$text-muted",
+              "content": "后台服务运行中 · 按目标 FPS 推理",
+              "textAlign": "center",
+              "fontFamily": "Inter",
+              "fontSize": 12
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "osMFr",
+      "x": 1320,
+      "y": 0,
+      "name": "AlertFrameScreen",
+      "width": 393,
+      "height": 852,
+      "fill": "$bg-dark",
+      "layout": "vertical",
+      "alignItems": "center",
+      "children": [
+        {
+          "type": "frame",
+          "id": "QNPhR",
+          "name": "StatusBar",
+          "width": "fill_container",
+          "height": 62,
+          "padding": [
+            0,
+            24
+          ],
+          "justifyContent": "space_between",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "iDJar",
+              "name": "timeLabel2",
+              "fill": "$text-primary",
+              "content": "09:41",
+              "fontFamily": "Inter",
+              "fontSize": 17,
+              "fontWeight": "600"
+            },
+            {
+              "type": "frame",
+              "id": "WAEq8",
+              "name": "statusIcons2",
+              "gap": 6,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon_font",
+                  "id": "TW2dg",
+                  "name": "signalIcon2",
+                  "width": 16,
+                  "height": 16,
+                  "iconFontName": "signal",
+                  "iconFontFamily": "lucide",
+                  "fill": "$text-primary"
+                },
+                {
+                  "type": "icon_font",
+                  "id": "Y3NgA",
+                  "name": "wifiIcon2",
+                  "width": 16,
+                  "height": 16,
+                  "iconFontName": "wifi",
+                  "iconFontFamily": "lucide",
+                  "fill": "$text-primary"
+                },
+                {
+                  "type": "icon_font",
+                  "id": "ZnfkE",
+                  "name": "batteryIcon2",
+                  "width": 16,
+                  "height": 16,
+                  "iconFontName": "battery-full",
+                  "iconFontFamily": "lucide",
+                  "fill": "$text-primary"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "6zIvI",
+          "name": "alertHeader2",
+          "width": "fill_container",
+          "padding": [
+            16,
+            16,
+            12,
+            16
+          ],
+          "justifyContent": "space_between",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "iEAde",
+              "name": "alertHeaderTitle",
+              "fill": "$alert-red",
+              "content": "检测到目标!",
+              "fontFamily": "Inter",
+              "fontSize": 24,
+              "fontWeight": "700"
+            },
+            {
+              "type": "frame",
+              "id": "omcQ5",
+              "name": "alertHeaderBadge",
+              "fill": "$alert-red",
+              "cornerRadius": "$radius-xl",
+              "gap": 6,
+              "padding": [
+                6,
+                12
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "ellipse",
+                  "id": "fvu8D",
+                  "name": "alertHeaderDot",
+                  "fill": "#FFFFFF",
+                  "width": 8,
+                  "height": 8
+                },
+                {
+                  "type": "text",
+                  "id": "gkJGd",
+                  "name": "alertHeaderBadgeText",
+                  "fill": "#FFFFFF",
+                  "content": "报警中",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "600"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "7w0Sb",
+          "name": "alertFrameArea",
+          "clip": true,
+          "width": "fill_container",
+          "height": "fill_container",
+          "layout": "vertical",
+          "gap": 16,
+          "padding": [
+            0,
+            16,
+            16,
+            16
+          ],
+          "children": [
+            {
+              "type": "frame",
+              "id": "LbpZK",
+              "name": "frameViewer",
+              "clip": true,
+              "width": "fill_container",
+              "height": 320,
+              "fill": "#2D2D2D",
+              "cornerRadius": "$radius-lg",
+              "layout": "vertical",
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "rectangle",
+                  "cornerRadius": "$radius-lg",
+                  "id": "bXNqc",
+                  "name": "frameBorderRect",
+                  "fill": "#00000000",
+                  "width": "fill_container",
+                  "height": "fill_container",
+                  "stroke": {
+                    "align": "inside",
+                    "thickness": 2,
+                    "fill": "$alert-red"
+                  }
+                },
+                {
+                  "type": "text",
+                  "id": "i0uHB",
+                  "name": "frameMockText",
+                  "fill": "$text-muted",
+                  "content": "[报警帧 - 带检测框绘制]",
+                  "fontFamily": "Inter",
+                  "fontSize": 14,
+                  "fontWeight": "500"
+                },
+                {
+                  "type": "text",
+                  "id": "s4VfK",
+                  "name": "frameMockSub",
+                  "fill": "$text-muted",
+                  "content": "person: 0.87  |  car: 0.62",
+                  "fontFamily": "Inter",
+                  "fontSize": 12
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "y5cGh",
+              "name": "detectionCard",
+              "width": "fill_container",
+              "fill": "$surface-container",
+              "cornerRadius": "$radius-lg",
+              "layout": "vertical",
+              "gap": 12,
+              "padding": 16,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "liEMD",
+                  "name": "detectionTitle",
+                  "fill": "$text-primary",
+                  "content": "检测结果",
+                  "fontFamily": "Inter",
+                  "fontSize": 16,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "frame",
+                  "id": "UNwV2",
+                  "name": "detectionList",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 8,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "fuYon",
+                      "name": "detRow1",
+                      "width": "fill_container",
+                      "justifyContent": "space_between",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "kAQVj",
+                          "name": "detRow1Label",
+                          "fill": "$text-primary",
+                          "content": "person",
+                          "fontFamily": "Inter",
+                          "fontSize": 14,
+                          "fontWeight": "500"
+                        },
+                        {
+                          "type": "text",
+                          "id": "RSp2x",
+                          "name": "detRow1Value",
+                          "fill": "$accent-green",
+                          "content": "87%",
+                          "fontFamily": "Inter",
+                          "fontSize": 14,
+                          "fontWeight": "600"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "xdKCS",
+                      "name": "detRow2",
+                      "width": "fill_container",
+                      "justifyContent": "space_between",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "ptFds",
+                          "name": "detRow2Label",
+                          "fill": "$text-primary",
+                          "content": "car",
+                          "fontFamily": "Inter",
+                          "fontSize": 14,
+                          "fontWeight": "500"
+                        },
+                        {
+                          "type": "text",
+                          "id": "s0cta",
+                          "name": "detRow2Value",
+                          "fill": "$accent-amber",
+                          "content": "62%",
+                          "fontFamily": "Inter",
+                          "fontSize": 14,
+                          "fontWeight": "600"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "jujPs",
+              "name": "metaCard",
+              "width": "fill_container",
+              "fill": "$surface-container",
+              "cornerRadius": "$radius-lg",
+              "gap": 12,
+              "padding": 14,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "rHy7k",
+                  "name": "metaTime",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 4,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "k67Tz",
+                      "name": "metaTimeVal",
+                      "fill": "$text-primary",
+                      "content": "09:40:15",
+                      "fontFamily": "Inter",
+                      "fontSize": 16,
+                      "fontWeight": "600"
+                    },
+                    {
+                      "type": "text",
+                      "id": "T2SDt",
+                      "name": "metaTimeLabel",
+                      "fill": "$text-muted",
+                      "content": "报警时间",
+                      "fontFamily": "Inter",
+                      "fontSize": 11
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "EJ3B3",
+                  "name": "metaFps",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 4,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "s4Hop",
+                      "name": "metaFpsVal",
+                      "fill": "$accent-blue",
+                      "content": "2.0",
+                      "fontFamily": "Inter",
+                      "fontSize": 16,
+                      "fontWeight": "600"
+                    },
+                    {
+                      "type": "text",
+                      "id": "3sOIj",
+                      "name": "metaFpsLabel",
+                      "fill": "$text-muted",
+                      "content": "推理 FPS",
+                      "fontFamily": "Inter",
+                      "fontSize": 11
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "VPavV",
+                  "name": "metaModel",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 4,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "686cB",
+                      "name": "metaModelVal",
+                      "fill": "$primary-color",
+                      "content": "YOLO26n",
+                      "fontFamily": "Inter",
+                      "fontSize": 16,
+                      "fontWeight": "600"
+                    },
+                    {
+                      "type": "text",
+                      "id": "tMqOc",
+                      "name": "metaModelLabel",
+                      "fill": "$text-muted",
+                      "content": "模型",
+                      "fontFamily": "Inter",
+                      "fontSize": 11
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "variables": {
+    "accent-amber": {
+      "type": "color",
+      "value": "#F59E0B"
+    },
+    "accent-blue": {
+      "type": "color",
+      "value": "#3B82F6"
+    },
+    "accent-green": {
+      "type": "color",
+      "value": "#22C55E"
+    },
+    "alert-red": {
+      "type": "color",
+      "value": "#EF4444"
+    },
+    "bg-card": {
+      "type": "color",
+      "value": "#1E1E1E"
+    },
+    "bg-dark": {
+      "type": "color",
+      "value": "#121212"
+    },
+    "border-subtle": {
+      "type": "color",
+      "value": "#3F3F46"
+    },
+    "error": {
+      "type": "color",
+      "value": "#F2B8B5"
+    },
+    "font-body": {
+      "type": "string",
+      "value": "Inter"
+    },
+    "font-headline": {
+      "type": "string",
+      "value": "Inter"
+    },
+    "on-error": {
+      "type": "color",
+      "value": "#601410"
+    },
+    "on-primary": {
+      "type": "color",
+      "value": "#FFFFFF"
+    },
+    "on-primary-container": {
+      "type": "color",
+      "value": "#21005D"
+    },
+    "on-surface": {
+      "type": "color",
+      "value": "#E6E1E5"
+    },
+    "on-surface-variant": {
+      "type": "color",
+      "value": "#CAC4D0"
+    },
+    "outline": {
+      "type": "color",
+      "value": "#938F99"
+    },
+    "primary-color": {
+      "type": "color",
+      "value": "#6750A4"
+    },
+    "primary-container": {
+      "type": "color",
+      "value": "#EADDFF"
+    },
+    "radius-lg": {
+      "type": "number",
+      "value": 16
+    },
+    "radius-md": {
+      "type": "number",
+      "value": 12
+    },
+    "radius-sm": {
+      "type": "number",
+      "value": 8
+    },
+    "radius-xl": {
+      "type": "number",
+      "value": 24
+    },
+    "screen-height": {
+      "type": "number",
+      "value": 852
+    },
+    "screen-width": {
+      "type": "number",
+      "value": 393
+    },
+    "secondary": {
+      "type": "color",
+      "value": "#625B71"
+    },
+    "spacing-lg": {
+      "type": "number",
+      "value": 24
+    },
+    "spacing-md": {
+      "type": "number",
+      "value": 16
+    },
+    "spacing-sm": {
+      "type": "number",
+      "value": 8
+    },
+    "spacing-xl": {
+      "type": "number",
+      "value": 32
+    },
+    "spacing-xs": {
+      "type": "number",
+      "value": 4
+    },
+    "success": {
+      "type": "color",
+      "value": "#4ADE80"
+    },
+    "surface": {
+      "type": "color",
+      "value": "#1C1B1F"
+    },
+    "surface-container": {
+      "type": "color",
+      "value": "#2B2930"
+    },
+    "surface-variant": {
+      "type": "color",
+      "value": "#49454F"
+    },
+    "text-muted": {
+      "type": "color",
+      "value": "#71717A"
+    },
+    "text-primary": {
+      "type": "color",
+      "value": "#E6E1E5"
+    },
+    "text-secondary": {
+      "type": "color",
+      "value": "#A1A1AA"
+    }
+  }
+}

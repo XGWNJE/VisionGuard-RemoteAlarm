@@ -83,7 +83,8 @@ export function initPing(): void {
   setInterval(() => {
     for (const [, client] of windowsClients) {
       if (!aliveClients.has(client.ws)) {
-        console.log(`[ws][${new Date().toISOString()}] Ping 超时终止: Windows ${client.deviceName} (${client.deviceId})`);
+        const roleLabel = client.clientType === 'android-detector' ? 'Android检测端' : 'Windows';
+        console.log(`[ws][${new Date().toISOString()}] Ping 超时终止: ${roleLabel} ${client.deviceName} (${client.deviceId})`);
         client.ws.terminate();
         continue;
       }
@@ -147,7 +148,7 @@ function closeCodeToSessionEndReason(code: number, deviceId: string): string {
  */
 export function handleConnection(ws: WebSocket): void {
   let authenticated = false;
-  let role: 'windows' | 'android' | null = null;
+  let role: 'windows' | 'android' | 'android-detector' | null = null;
   let deviceId: string | null = null;
   const ts = new Date().toISOString();
   const remoteIp = (ws as any).socket?.remoteAddress ?? 'unknown';
@@ -185,13 +186,13 @@ export function handleConnection(ws: WebSocket): void {
     // 已认证后的消息路由
     switch (msg.type) {
       case 'heartbeat':
-        if (role === 'windows') handleHeartbeat(msg as WsHeartbeat);
+        if (role === 'windows' || role === 'android-detector') handleHeartbeat(msg as WsHeartbeat);
         break;
       case 'heartbeat-android':
         if (role === 'android') handleHeartbeatAndroid(msg as WsHeartbeatAndroid);
         break;
       case 'alert':
-        if (role === 'windows') {
+        if (role === 'windows' || role === 'android-detector') {
           (msg as WsAlertPush).serverReceivedAt = new Date().toISOString();
           broadcastAlert(msg as WsAlertPush);
         }
@@ -203,14 +204,14 @@ export function handleConnection(ws: WebSocket): void {
         if (role === 'android') handleSetConfig(ws, msg as WsSetConfig);
         break;
       case 'command-ack':
-        // Windows 端主动发回的 ack（含前置校验错误原因），转发给所有 Android
-        if (role === 'windows') handleWindowsCommandAck(msg as WsCommandAck, deviceId!);
+        // 检测端主动发回的 ack（含前置校验错误原因），转发给所有 Android 接收端
+        if (role === 'windows' || role === 'android-detector') handleWindowsCommandAck(msg as WsCommandAck, deviceId!);
         break;
       case 'request-screenshot':
         if (role === 'android') handleRequestScreenshot(ws, msg as WsRequestScreenshot, deviceId!);
         break;
       case 'screenshot-data':
-        if (role === 'windows') handleScreenshotData(msg as WsScreenshotData);
+        if (role === 'windows' || role === 'android-detector') handleScreenshotData(msg as WsScreenshotData);
         break;
       case 'disconnect-reason':
         // 客户端主动上报断开原因（帮助服务端诊断）
@@ -228,14 +229,16 @@ export function handleConnection(ws: WebSocket): void {
     const ts = new Date().toISOString();
     const codeName = getCloseCodeName(code);
     if (deviceId) {
-      if (role === 'windows') {
+      if (role === 'windows' || role === 'android-detector') {
         const existing = windowsClients.get(deviceId);
         if (existing && existing.ws === ws) {
           windowsClients.delete(deviceId);
-          console.log(`[ws][${ts}] Windows 断开: ${deviceId} code=${code}(${codeName}) Windows在线=${windowsClients.size}`);
+          const roleLabel = role === 'android-detector' ? 'Android检测端' : 'Windows';
+          console.log(`[ws][${ts}] ${roleLabel} 断开: ${deviceId} code=${code}(${codeName}) 检测端在线=${windowsClients.size}`);
           scheduleBroadcast();
         } else {
-          console.log(`[ws][${ts}] Windows 旧连接关闭（已被新连接替代）: ${deviceId} code=${code}(${codeName})`);
+          const roleLabel = role === 'android-detector' ? 'Android检测端' : 'Windows';
+          console.log(`[ws][${ts}] ${roleLabel} 旧连接关闭（已被新连接替代）: ${deviceId} code=${code}(${codeName})`);
         }
       } else if (role === 'android') {
         const existing = androidClients.get(deviceId);
@@ -281,7 +284,7 @@ function handleAuth(
   ws: WebSocket,
   msg: WsAuthMessage,
   authTimer: NodeJS.Timeout,
-  onSuccess: (role: 'windows' | 'android', deviceId: string) => void,
+  onSuccess: (role: 'windows' | 'android' | 'android-detector', deviceId: string) => void,
 ): void {
   clearTimeout(authTimer);
   const ts = new Date().toISOString();
@@ -323,7 +326,30 @@ function handleAuth(
       targets: '',
     };
     windowsClients.set(msg.deviceId, clientData);
-    console.log(`[ws][${ts}] Windows 上线: ${msg.deviceName} (${msg.deviceId}) | Windows在线: ${windowsClients.size} Android在线: ${androidClients.size}`);
+    console.log(`[ws][${ts}] Windows 上线: ${msg.deviceName} (${msg.deviceId}) | 检测端在线: ${windowsClients.size} 接收端在线: ${androidClients.size}`);
+  } else if (msg.role === 'android-detector') {
+    const existingClient = windowsClients.get(msg.deviceId);
+    if (existingClient) {
+      console.log(`[ws][${ts}] Android检测端 重复连接: ${msg.deviceName} (${msg.deviceId}) 踢掉旧连接`);
+      windowsClients.delete(msg.deviceId);
+      sendJson(existingClient.ws, { type: 'kicked', reason: 'duplicate connection' });
+      existingClient.ws.terminate();
+    }
+    const clientData: WindowsClient = {
+      ws,
+      deviceId: msg.deviceId,
+      deviceName: msg.deviceName,
+      clientType: msg.role,
+      isMonitoring: false,
+      isAlarming: false,
+      isReady: false,
+      lastSeen: new Date(),
+      cooldown: 5,
+      confidence: 0.45,
+      targets: '',
+    };
+    windowsClients.set(msg.deviceId, clientData);
+    console.log(`[ws][${ts}] Android检测端 上线: ${msg.deviceName} (${msg.deviceId}) | 检测端在线: ${windowsClients.size} 接收端在线: ${androidClients.size}`);
   } else if (msg.role === 'android') {
     const existingClient = androidClients.get(msg.deviceId);
     if (existingClient) {
@@ -352,9 +378,9 @@ function handleAuth(
     if (prevSession) {
       const durationSec = Math.round((now - prevSession.connectedAt) / 1000);
       const reasonDesc = SessionEndReasonNames[prevSession.lastSessionEndReason] ?? `code=${prevSession.lastSessionEndReason}`;
-      console.log(`[ws][${ts}] Android 重连诊断: deviceId=${msg.deviceId} 上次持续${durationSec}s | 结束原因: ${reasonDesc} | Android在线: ${androidClients.size}`);
+      console.log(`[ws][${ts}] Android 重连诊断: deviceId=${msg.deviceId} 上次持续${durationSec}s | 结束原因: ${reasonDesc} | 接收端在线: ${androidClients.size}`);
     } else {
-      console.log(`[ws][${ts}] Android 首次连接: ${msg.deviceId} | Android在线: ${androidClients.size}`);
+      console.log(`[ws][${ts}] Android 首次连接: ${msg.deviceId} | 接收端在线: ${androidClients.size}`);
     }
 
     // 监听 OkHttp ping 帧（每 25s 一次），更新存活时间
@@ -366,7 +392,7 @@ function handleAuth(
         console.log(`[ws][${new Date().toISOString()}] Android ping 但未找到客户端: ${pingDeviceId}`);
       }
     });
-    console.log(`[ws][${ts}] Android 上线: ${msg.deviceId} | Android在线: ${androidClients.size}`);
+    console.log(`[ws][${ts}] Android 上线: ${msg.deviceId} | 接收端在线: ${androidClients.size}`);
   } else {
     console.log(`[ws][${ts}] 认证失败: 无效 role=${msg.role}`);
     sendJson(ws, { type: 'auth-result', success: false, reason: 'invalid role' });
@@ -416,7 +442,8 @@ function handleHeartbeat(msg: WsHeartbeat): void {
   _heartbeatCounter.set(msg.deviceId, count % 60 === 0 ? 0 : count);
   if (count === 1 || count % 60 === 0) {
     const silentSec = Math.round((Date.now() - client.lastSeen.getTime()) / 1000);
-    console.log(`[ws][${new Date().toISOString()}] Windows 心跳: ${client.deviceName} (${msg.deviceId}) monitoring=${msg.isMonitoring} alarming=${msg.isAlarming} 静默${silentSec}s`);
+    const roleLabel = client.clientType === 'android-detector' ? 'Android检测端' : 'Windows';
+    console.log(`[ws][${new Date().toISOString()}] ${roleLabel} 心跳: ${client.deviceName} (${msg.deviceId}) monitoring=${msg.isMonitoring} alarming=${msg.isAlarming} 静默${silentSec}s`);
   }
 
   client.lastSeen = new Date();
@@ -483,14 +510,14 @@ function handleCommand(senderWs: WebSocket, msg: WsCommand): void {
     return;
   }
 
-  // 转发给目标 Windows（Windows 端会自行发回带 reason 的 command-ack）
+  // 转发给目标检测端（检测端会自行发回带 reason 的 command-ack）
   const relay: WsCommandRelay = { type: 'command', command: msg.command };
   const sent = sendJson(target.ws, relay, `command->${msg.targetDeviceId}`);
   console.log(`[ws][${new Date().toISOString()}] 命令转发: command=${msg.command} target=${target.deviceName}(${msg.targetDeviceId}) success=${sent}`);
 
   // 注意：这里只发"已转发"的临时 ack；
-  // Windows 端执行后会再发一个带 success/reason 的 command-ack，
-  // 由 handleWindowsCommandAck 转发给 Android。
+  // 检测端执行后会再发一个带 success/reason 的 command-ack，
+  // 由 handleWindowsCommandAck 转发给 Android 接收端。
   ack.success = true;
   ack.reason = 'relayed';
   sendJson(senderWs, ack, 'command-ack->sender');
@@ -514,30 +541,30 @@ function handleSetConfig(senderWs: WebSocket, msg: WsSetConfig): void {
     return;
   }
 
-  // 转发 set-config 给目标 Windows
+  // 转发 set-config 给目标检测端
   const relay: WsSetConfigRelay = { type: 'set-config', key: msg.key, value: msg.value };
   const sent = sendJson(target.ws, relay, `set-config->${msg.targetDeviceId}`);
   console.log(`[ws][${new Date().toISOString()}] 配置更新转发: key=${msg.key} value=${msg.value} target=${target.deviceName}(${msg.targetDeviceId}) success=${sent}`);
 
-  // 同样只发"已转发"，Windows 端执行后回 command-ack
+  // 同样只发"已转发"，检测端执行后回 command-ack
   ack.success = true;
   ack.reason = 'relayed';
   sendJson(senderWs, ack, 'set-config-ack->sender');
 }
 
-/** Windows 端主动回传的 command-ack（含具体执行结果），广播给所有 Android */
-function handleWindowsCommandAck(ack: WsCommandAck, windowsDeviceId: string): void {
-  // 补充 targetDeviceId（Windows 自己就是 target，让 Android 知道是哪台设备的回执）
-  const enriched = { ...ack, targetDeviceId: windowsDeviceId };
+/** 检测端主动回传的 command-ack（含具体执行结果），广播给所有 Android 接收端 */
+function handleWindowsCommandAck(ack: WsCommandAck, detectorDeviceId: string): void {
+  // 补充 targetDeviceId（检测端自己就是 target，让接收端知道是哪台设备的回执）
+  const enriched = { ...ack, targetDeviceId: detectorDeviceId };
   const result = broadcastToAndroid(enriched, `command-ack:${ack.command}`);
-  console.log(`[ws][${new Date().toISOString()}] 命令结果广播: device=${windowsDeviceId} command=${ack.command} success=${ack.success} reason=${ack.reason} 发送成功=${result.success} 失败=${result.failed}`);
+  console.log(`[ws][${new Date().toISOString()}] 命令结果广播: device=${detectorDeviceId} command=${ack.command} success=${ack.success} reason=${ack.reason} 发送成功=${result.success} 失败=${result.failed}`);
 }
 
-/** Android 请求截图：转发给目标 Windows，登记待回传路由 */
+/** Android 接收端请求截图：转发给目标检测端，登记待回传路由 */
 function handleRequestScreenshot(senderWs: WebSocket, msg: WsRequestScreenshot, senderDeviceId: string): void {
   const target = windowsClients.get(msg.targetDeviceId);
   if (!target || target.ws.readyState !== WebSocket.OPEN) {
-    // 目标不在线，直接告知 Android
+    // 目标不在线，直接告知请求方
     sendJson(senderWs, {
       type: 'screenshot-data',
       alertId: msg.alertId,
@@ -663,25 +690,29 @@ setInterval(() => {
     }
   }
 
-  // Windows 幽灵清理（新增，与 Android 一样检测）
+  // 检测端幽灵清理（Windows + Android检测端）
   for (const [id, client] of windowsClients) {
     if (client.lastSeen.getTime() < ghostDeadline) {
       const silentSec = Math.round((now - client.lastSeen.getTime()) / 1000);
-      console.log(`[ws][${ts}] Windows 幽灵清理: ${client.deviceName} (${id}) 静默 ${silentSec}s 阈值 ${config.deviceOfflineMs / 1000}s`);
+      const roleLabel = client.clientType === 'android-detector' ? 'Android检测端' : 'Windows';
+      console.log(`[ws][${ts}] ${roleLabel} 幽灵清理: ${client.deviceName} (${id}) 静默 ${silentSec}s 阈值 ${config.deviceOfflineMs / 1000}s`);
       client.ws.terminate();
       windowsClients.delete(id);
       _heartbeatCounter.delete(id);
     }
   }
 
-  // 向 Windows 发送 keep-alive（防止 Windows 端 60s 幽灵检测误判断连）
+  // 向检测端发送 keep-alive（防止客户端 60s 幽灵检测误判断连）
   for (const client of windowsClients.values()) {
     sendJson(client.ws, { type: 'ping' });
   }
 
   if (androidClients.size > 0 || windowsClients.size > 0) {
     broadcastDeviceList();
-    console.log(`[ws][${ts}] 定时推送 → ${androidClients.size} Android / ${windowsClients.size} Windows`);
+    const detectorCount = windowsClients.size;
+    const androidDetectorCount = Array.from(windowsClients.values()).filter(c => c.clientType === 'android-detector').length;
+    const windowsCount = detectorCount - androidDetectorCount;
+    console.log(`[ws][${ts}] 定时推送 → 接收端:${androidClients.size} / Windows:${windowsCount} / Android检测端:${androidDetectorCount}`);
   }
 }, 30_000);
 

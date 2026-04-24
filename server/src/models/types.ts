@@ -37,7 +37,7 @@ export interface AlertRecord {
 export interface WsAuthMessage {
   type: 'auth';
   apiKey: string;
-  role: 'windows' | 'android';
+  role: 'windows' | 'android' | 'android-detector';
   deviceId: string;
   deviceName: string;
   version?: string;

@@ -5,10 +5,10 @@
 ## 项目概览
 
 ```
-detector/windows/          server/                    receiver/android/
-  (推理检测端)        ──►  VPS 中继服务器  ──►         (通知接收端)
-  Windows PC(s)           Node.js / WebSocket          Android 手机
-  YOLO26 目标检测          HTTP REST + WS               查看报警 / 远程控制
+detector/windows/    detector/android/         server/                    receiver/android/
+  (Win检测端)           (安卓检测端)       ──►  VPS 中继服务器  ──►         (接收端)
+  屏幕/窗口捕获         后置摄像头 + ONNX          Node.js / WebSocket          Android 手机
+  YOLO26 目标检测       YOLO26 目标检测            HTTP REST + WS               查看报警 / 远程控制
 ```
 
 | 目录 | 技术栈 | 功能 |
@@ -20,10 +20,8 @@ detector/windows/          server/                    receiver/android/
 
 ## 版本管理
 
-- **当前版本**：`3.3.1`（见根目录 [VERSION](VERSION)）
-- **三端版本必须严格同步**：Server `package.json`、Android `build.gradle.kts`、Windows `AssemblyInfo.cs` / `.csproj`
-- **规则文件**：[VERSION_RULES.md](VERSION_RULES.md)
-- **Commit 前缀规范**：
+- **当前版本**：见根目录 [VERSION](VERSION)（纯人工备忘，无自动同步）
+- **版本号规则**：
   - `feat:` → 次版本 +1（3.0.0 → 3.1.0）
   - `fix:` / `refactor:` / `perf:` → 修订号 +1（3.0.0 → 3.0.1）
   - `chore:` / `docs:` / `style:` → 不升级版本
@@ -60,25 +58,26 @@ detector/windows/          server/                    receiver/android/
 **核心模块**：
 - `routes/alert.ts` — POST `/api/alert` 接收报警上传（multipart/form-data）
 - `routes/screenshot.ts` — GET `/screenshots/:id.png` 提供截图下载
-- `services/ConnectionManager.ts` — WebSocket 连接管理：认证、心跳、设备列表广播、命令中继
+- `services/ConnectionManager.ts` — WebSocket 连接管理：认证、心跳、设备列表广播、报警广播、命令/配置/截图中继；支持三角色（`windows` / `android` / `android-detector`）
 - `services/AlertStore.ts` — 内存报警记录存储（按设备循环缓冲，默认 200 条/设备）
 - `services/ScreenshotCleanup.ts` — 截图过期清理（默认 TTL 72 小时）
 
 **WebSocket 消息类型**：
-| 方向 | 类型 | 说明 |
-|---|---|---|
-| → Server | `auth` | 认证（含 role: windows/android） |
-| → Server | `heartbeat` | Windows 心跳（15s） |
-| → Server | `heartbeat-android` | Android 心跳（20s） |
-| → Server | `alert` | Windows 上报报警 |
-| → Server | `command` | Android 下发控制命令 |
-| → Server | `set-config` | Android 调整检测参数 |
-| → Server | `request-sccreenshot` | Android 请求截图 |
-| → Server | `screenshot-data` | Windows 回传截图（base64 JPEG） |
-| ← Server | `device-list` | 设备列表广播 |
-| ← Server | `alert` | 报警推送 |
-| ← Server | `command-ack` | 命令执行结果 |
-| ← Server | `kicked` | 重复连接被踢 |
+| 方向 | 类型 | 发送方 | 说明 |
+|---|---|---|---|
+| → Server | `auth` | 所有端 | 认证（role: `windows` / `android` / `android-detector`） |
+| → Server | `heartbeat` | Windows / Android检测端 | 富状态心跳（15s，含 monitoring/alarming/ready） |
+| → Server | `heartbeat-android` | Android接收端 | 极简心跳（20s） |
+| → Server | `alert` | 检测端 | 报警推送（HTTP POST `/api/alert` + 截图） |
+| → Server | `command` | Android接收端 | 下发控制命令（pause/resume/stop-alarm） |
+| → Server | `set-config` | Android接收端 | 调整检测参数（cooldown/confidence/targets） |
+| → Server | `request-screenshot` | Android接收端 | 请求指定设备截图 |
+| → Server | `screenshot-data` | 检测端 | 回传截图（base64 JPEG） |
+| → Server | `command-ack` | 检测端 | 命令执行结果回执 |
+| ← Server | `device-list` | Server | 设备列表广播 |
+| ← Server | `alert` | Server | 报警推送 |
+| ← Server | `command-ack` | Server | 命令执行结果（含 relayed/实际结果两次） |
+| ← Server | `kicked` | Server | 重复连接被踢 |
 
 **部署**：VPS `66.154.112.91:3000`，systemd 服务 `visionguard`
 **部署脚本**：[server/deploy.sh](server/deploy.sh)
@@ -107,20 +106,29 @@ detector/windows/          server/                    receiver/android/
 **架构**：前台 Service（`foregroundServiceType="camera"`）+ CameraX `ImageAnalysis`（无 Preview）+ ONNX Runtime Mobile 纯 CPU 推理
 
 **核心模块**：
-- `inference/OnnxInferenceEngine.kt` — ONNX Runtime Mobile 会话封装，线程数 2，默认 CPU 执行
+- `inference/OnnxInferenceEngine.kt` — ONNX Runtime Mobile 会话封装，线程数 2，纯 CPU 执行
 - `inference/YoloOutputParser.kt` — yolo26 输出解析 + NMS，支持 320×320 和 640×640 两种分辨率
 - `inference/ImagePreprocessor.kt` — `ImageProxy`/`Bitmap` → CHW RGB float 数组
-- `inference/SocWhitelist.kt` — SoC 白名单检测（骁龙 8 Gen / 天玑 9000+ / 麒麟 9000 / Exynos 2200+），决定默认分辨率 320 或 640
-- `service/MonitorService.kt` — 主监控循环：按 `intervalMs = 1000 / targetFps` 控制推理间隔（默认 2 FPS，可调范围 1–5 FPS）
-- `service/AlertService.kt` — 冷却锁判定，触发报警帧绘制与推送
+- `inference/SocWhitelist.kt` — SoC 白名单检测（骁龙 7/8 Gen / 天玑 8/9 系列 / 麒麟 / Exynos），决定高分辨率选项是否可用
+- `service/MonitorService.kt` — 主监控循环：按 `intervalMs = 1000 / targetSamplingRate` 控制推理间隔（默认 2次/秒，可调 1–5次/秒）
+- `service/AlertService.kt` — 冷却锁判定，触发报警帧绘制与推送（冷却仅限制推送频率，不影响识别预览）
 - `service/DetectorForegroundService.kt` — 前台服务：绑定 CameraX + MonitorService + ServerPushService
 - `service/ServerPushService.kt` — WS 认证、心跳、报警推送、命令接收（role: `android-detector`）
-- `data/remote/WebSocketClient.kt` — 复用 receiver 端 WS 封装，role 改为 `"android-detector"`
+- `data/remote/WebSocketClient.kt` — WS 客户端，role 为 `"android-detector"`
 - `util/SnapshotRenderer.kt` — Canvas 绘制检测框（LimeGreen 边框 + 标签）
 
+**UI 架构**：BottomNavigation + NavHost 两页分页
+- **监控页**（`MonitorScreen`）：报警帧暂显（1:1 画布）、状态卡片、启停监控按钮、手动预览按钮
+- **设置页**（`SettingsScreen`）：模型选择（yolo26n/s）、置信度滑块、目标采样率滑块、监控目标 Chip 多选（人/汽车/卡车/客车/自行车/摩托车）、冷却时间滑块、高分辨率开关（需 SoC 支持）、服务器重连
+
 **关键文件**：
-- [计划文档](C:\Users\Administrator\.claude\plans\windows-detector-android-android-hidden-mccarthy.md) — Android 检测端完整实现方案
-- [UI 设计稿](detector/android/design/AndroidDetectorDesign.pen) — ConfigScreen + AlertFrameScreen 两屏设计
+- [MainActivity.kt](detector/android/app/src/main/java/com/xgwnje/visionguard/MainActivity.kt) — Scaffold + NavHost + Service 绑定
+- [MonitorScreen.kt](detector/android/app/src/main/java/com/xgwnje/visionguard/ui/screen/MonitorScreen.kt) — 监控页（报警帧 + 状态 + 启停/预览按钮）
+- [SettingsScreen.kt](detector/android/app/src/main/java/com/xgwnje/visionguard/ui/screen/SettingsScreen.kt) — 设置页（所有推理参数）
+- [DetectorForegroundService.kt](detector/android/app/src/main/java/com/xgwnje/visionguard/service/DetectorForegroundService.kt) — 前台服务核心
+- [MonitorService.kt](detector/android/app/src/main/java/com/xgwnje/visionguard/service/MonitorService.kt) — 帧处理 → 推理 → 报警判定
+- [StatusCard.kt](detector/android/app/src/main/java/com/xgwnje/visionguard/ui/component/StatusCard.kt) — 连接/监控/采样率/模型状态卡片
+- [AlertFrameViewer.kt](detector/android/app/src/main/java/com/xgwnje/visionguard/ui/component/AlertFrameViewer.kt) — 报警帧 1:1 画布显示
 
 **模型**：
 - `yolo26n_320.onnx` / `yolo26n_640.onnx`（~5–6MB，轻量高速）
@@ -129,8 +137,11 @@ detector/windows/          server/                    receiver/android/
 
 **关键约束**：
 - 无实时预览：仅绑定 `ImageAnalysis`，不绑定 `Preview`，降低 GPU/CPU 负载
-- 报警帧暂显：检测到目标时临时显示绘制后的报警帧，3 秒后自动清空
-- FPS 限制：默认 2 FPS，可调范围 1–5 FPS，控制设备发热
+- 报警帧暂显：检测到目标时显示绘制后的报警帧；冷却期内识别继续，预览持续展示
+- 手动预览：监控中可随时捕获当前帧到预览画布，辅助无目标时的摄像头部署
+- 目标采样率：默认 2次/秒（上限），可调 1–5次/秒；实际采样率受推理耗时影响，低于目标 80% 时橙色提示性能不足
+- 高分辨率：640×640 需手动开启，仅 SoC 白名单内设备可用
+- 监控目标：Chip 按钮多选（人 / 汽车 / 卡车 / 客车 / 自行车 / 摩托车）
 
 ## 环境配置
 
@@ -224,13 +235,13 @@ Detector                   Server                   Receiver
 
 ## 开发注意事项
 
-1. **版本号同步**：任何功能提交必须同时更新三端版本号。使用根目录 `VERSION` 文件作为唯一来源。
+1. **版本号管理**：纯人工控制。需要更新时手动修改各端版本号（Server `package.json`、Android `build.gradle.kts`、Windows `.csproj` / `AssemblyInfo.cs`），并同步更新根目录 `VERSION` 备忘。
 2. **协议兼容性**：修改 WS 消息格式属于 BREAKING CHANGE，必须升级主版本号。
 3. **截图路径**：Server 存储截图到 `data/screenshots/<alertId>.png`，通过 HTTP 提供下载，Android 通过 WS 接收 base64 数据。
 4. **NTP 同步**：Windows 端启动时同步 NTP 时钟，确保报警时间戳准确。
 5. **网络切换**：Android 端监听网络变化，切换网络时立即重建 WS 连接（清除 OkHttp 连接池）。
 6. **幽灵检测**：Server 75s 无消息视为离线；Android 45s 无消息主动断开重连。
-7. **Android 检测端模型打包**：四个模型（n_320、n_640、s_320、s_640）全部打包到 APK assets，应用首次启动时按用户选择 + SoC 白名单复制对应模型到 `filesDir/models/`。
-8. **分辨率策略**：默认 320×320 纯 CPU 运行；SocWhitelist 检测到高端 SoC（骁龙 8 Gen / 天玑 9000+ / 麒麟 9000 / Exynos 2200+）自动切换至 640×640。
-9. **FPS 与热管理**：默认 2 FPS，可调范围 1–5 FPS；无 Preview 绑定以降低 GPU 负载；持续监控时注意设备发热。
+7. **Android 检测端模型打包**：四个模型（n_320、n_640、s_320、s_640）全部打包到 APK assets，应用首次启动按用户选择复制对应模型到 `filesDir/models/`。
+8. **分辨率策略**：默认 320×320 纯 CPU 运行；640×640 为手动开关，仅 SocWhitelist 检测到的中高端 SoC 可用。
+9. **采样率与热管理**：默认目标采样率 2次/秒（上限），可调 1–5次/秒；无 Preview 绑定以降低 GPU 负载；持续监控时注意设备发热。
 10. **Android 14+ 前台服务**：`DetectorForegroundService` 需声明 `foregroundServiceType="camera|remoteMessaging"`，`startForeground()` 必须在 Service 启动后 5 秒内调用。

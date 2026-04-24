@@ -68,9 +68,7 @@ cd receiver/android
 
 ## 版本管理
 
-三端版本严格同步，详见 [VERSION_RULES.md](VERSION_RULES.md)。
-
-当前版本：`3.3.0`
+当前版本：见 [VERSION](VERSION)（纯人工备忘）。
 
 ## License
 

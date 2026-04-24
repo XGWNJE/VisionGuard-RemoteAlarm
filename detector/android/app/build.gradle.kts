@@ -37,6 +37,10 @@ android {
     buildFeatures {
         compose = true
     }
+
+    androidResources {
+        noCompress += "onnx"
+    }
 }
 
 dependencies {
@@ -55,4 +59,15 @@ dependencies {
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
+
+    implementation(libs.camerax.core)
+    implementation(libs.camerax.camera2)
+    implementation(libs.camerax.lifecycle)
+    implementation(libs.androidx.navigation.compose)
+    implementation(libs.androidx.compose.material.icons.extended)
+    implementation(libs.onnxruntime)
+    implementation(libs.okhttp)
+    implementation(libs.gson)
+    implementation(libs.datastore.preferences)
+    implementation(libs.lifecycle.service)
 }

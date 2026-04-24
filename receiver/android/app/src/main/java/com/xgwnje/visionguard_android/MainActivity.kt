@@ -33,6 +33,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -55,6 +56,7 @@ class MainActivity : ComponentActivity() {
 
     private var boundService: AlertForegroundService? = null
     private var serviceBound by mutableStateOf(false)
+    private var pendingAlertId by mutableStateOf<String?>(null)
 
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName, binder: IBinder) {
@@ -75,6 +77,9 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
+        // 读取通知点击传入的 alertId
+        pendingAlertId = intent.getStringExtra("alertId")
+
         // 申请通知权限 (Android 13+)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(
@@ -94,9 +99,21 @@ class MainActivity : ComponentActivity() {
                         CircularProgressIndicator()
                     }
                 } else {
-                    VisionGuardNavHost(service = boundService!!)
+                    VisionGuardNavHost(
+                        service = boundService!!,
+                        initialAlertId = pendingAlertId
+                    )
                 }
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        // singleTop 模式下通知点击会触发此处
+        val alertId = intent.getStringExtra("alertId")
+        if (alertId != null) {
+            pendingAlertId = alertId
         }
     }
 
@@ -121,8 +138,20 @@ class MainActivity : ComponentActivity() {
 // ── 导航主机 ──────────────────────────────────────────────────
 
 @Composable
-fun VisionGuardNavHost(service: AlertForegroundService) {
+fun VisionGuardNavHost(
+    service: AlertForegroundService,
+    initialAlertId: String? = null
+) {
     val navController = rememberNavController()
+
+    // 若从通知点击进入，自动导航到报警详情
+    LaunchedEffect(initialAlertId) {
+        if (!initialAlertId.isNullOrEmpty()) {
+            navController.navigate("alertDetail/$initialAlertId") {
+                popUpTo("main") { saveState = true }
+            }
+        }
+    }
 
     NavHost(navController = navController, startDestination = "main") {
 

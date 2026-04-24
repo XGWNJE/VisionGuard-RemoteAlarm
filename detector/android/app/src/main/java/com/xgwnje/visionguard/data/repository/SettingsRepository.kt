@@ -33,6 +33,7 @@ class SettingsRepository(private val context: Context) {
         val SELECTED_MODEL      = stringPreferencesKey("selected_model")      // yolo26n / yolo26s
         val TARGET_SAMPLING_RATE = intPreferencesKey("target_sampling_rate")  // 次/秒，默认 3
         val USE_HIGH_RESOLUTION = booleanPreferencesKey("use_high_resolution") // 640x640，默认 false
+        val DEVICE_NAME         = stringPreferencesKey("device_name")          // 自定义设备名
     }
 
     companion object {
@@ -42,6 +43,7 @@ class SettingsRepository(private val context: Context) {
         const val DEFAULT_MODEL = "yolo26n"
         const val DEFAULT_TARGET_SAMPLING_RATE = 3
         const val DEFAULT_USE_HIGH_RESOLUTION = false
+        const val DEFAULT_DEVICE_NAME = "Android-Detector"
     }
 
     /** 读取设备 ID（首次启动时自动生成并持久化） */
@@ -91,6 +93,11 @@ class SettingsRepository(private val context: Context) {
         prefs[Keys.USE_HIGH_RESOLUTION] ?: DEFAULT_USE_HIGH_RESOLUTION
     }
 
+    /** 读取自定义设备名 */
+    val deviceNameFlow: Flow<String> = context.dataStore.data.map { prefs ->
+        prefs[Keys.DEVICE_NAME] ?: DEFAULT_DEVICE_NAME
+    }
+
     suspend fun setCooldown(v: Int) {
         context.dataStore.edit { prefs -> prefs[Keys.COOLDOWN] = v }
     }
@@ -122,4 +129,10 @@ class SettingsRepository(private val context: Context) {
     suspend fun getSelectedModel(): String = selectedModelFlow.first()
     suspend fun getTargetSamplingRate(): Int = targetSamplingRateFlow.first()
     suspend fun getUseHighResolution(): Boolean = useHighResolutionFlow.first()
+
+    suspend fun setDeviceName(v: String) {
+        context.dataStore.edit { prefs -> prefs[Keys.DEVICE_NAME] = v }
+    }
+
+    suspend fun getDeviceName(): String = deviceNameFlow.first()
 }

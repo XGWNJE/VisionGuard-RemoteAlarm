@@ -33,16 +33,16 @@ data class WsAuthResult(
 /** Android-receiver → 服务器：发送控制命令（pause / resume / stop-alarm） */
 data class WsCommandMessage(
     val type: String = "command",
-    val targetDeviceId: String,
+    val targetDeviceId: String = "",
     val command: String             // "pause" | "resume" | "stop-alarm"
 )
 
 /** Android-receiver → 服务器：下发参数调整（set-config） */
 data class WsSetConfigMessage(
     val type: String = "set-config",
-    val targetDeviceId: String,
-    val key: String,    // "cooldown" | "confidence" | "targets"
-    val value: String   // 字符串形式的值
+    val targetDeviceId: String = "",
+    val key: String = "",    // "cooldown" | "confidence" | "targets"
+    val value: String = ""   // 字符串形式的值
 )
 
 /** 服务器 → Android-detector：命令回执 */
@@ -74,16 +74,6 @@ data class WsHeartbeatMessage(
     val cooldown: Int = 5,
     val confidence: Double = 0.45,
     val targets: String = ""
-)
-
-/** Android-detector → 服务器：报警上报 */
-data class WsAlertMessage(
-    val type: String = "alert",
-    val deviceId: String,
-    val deviceName: String,
-    val timestamp: String,
-    val detections: List<com.xgwnje.visionguard.data.model.Detection>,
-    val imageBase64: String = ""
 )
 
 /** Android-detector → 服务器：日志上报 */

@@ -7,11 +7,6 @@ package com.xgwnje.visionguard_android.ui.component
 // │ 参数：冷却时间 / 置信度 / 监控目标（实时下发）             │
 // └─────────────────────────────────────────────────────────┘
 
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -55,7 +50,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.xgwnje.visionguard_android.data.model.DeviceConfig
 import com.xgwnje.visionguard_android.data.model.DeviceInfo
-import com.xgwnje.visionguard_android.data.model.cocoEnZhPairs
+import com.xgwnje.visionguard_android.data.model.targetEnZhPairs
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
@@ -107,41 +102,19 @@ fun DeviceCard(
             ) {
                 val enabled = device.online
 
-                if (!device.isAlarming) {
-                    if (device.isMonitoring) {
-                        OutlinedButton(
-                            onClick = { onCommand("pause") },
-                            enabled = enabled,
-                            modifier = Modifier.weight(1f)
-                        ) { Text("停止推理") }
-                    } else {
-                        OutlinedButton(
-                            onClick = { onCommand("resume") },
-                            enabled = enabled,
-                            modifier = Modifier.weight(1f)
-                        ) { Text("启动推理") }
-                    }
-                }
-
-                if (device.isAlarming) {
-                    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-                    val alpha by infiniteTransition.animateFloat(
-                        initialValue = 1f,
-                        targetValue = 0.4f,
-                        animationSpec = infiniteRepeatable(
-                            animation = tween(700),
-                            repeatMode = RepeatMode.Reverse
-                        ),
-                        label = "pulse_alpha"
-                    )
-                    Button(
-                        onClick = { onCommand("stop-alarm") },
+                // 开始/停止监控：纯远控按钮，只响应 isMonitoring，不响应 isAlarming
+                if (device.isMonitoring) {
+                    OutlinedButton(
+                        onClick = { onCommand("pause") },
                         enabled = enabled,
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F)),
-                        modifier = Modifier
-                            .weight(1f)
-                            .alpha(if (enabled) alpha else 0.5f)
-                    ) { Text("停止报警", color = Color.White) }
+                        modifier = Modifier.weight(1f)
+                    ) { Text("停止监控") }
+                } else {
+                    OutlinedButton(
+                        onClick = { onCommand("resume") },
+                        enabled = enabled,
+                        modifier = Modifier.weight(1f)
+                    ) { Text("开始监控") }
                 }
 
                 OutlinedButton(
@@ -345,7 +318,7 @@ private fun TargetsPage(
             .padding(horizontal = 4.dp)
     ) {
         // FlowLayout 效果：用多行 Row 模拟（每行放多个 chip）
-        val rows = cocoEnZhPairs.chunked(4)
+        val rows = targetEnZhPairs.chunked(4)
         for (row in rows) {
             Row(
                 modifier = Modifier.fillMaxWidth(),

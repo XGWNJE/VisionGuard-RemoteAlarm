@@ -13,7 +13,6 @@ import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.xgwnje.visionguard.data.model.DeviceInfo
-import com.xgwnje.visionguard.data.model.WsAlertMessage
 import com.xgwnje.visionguard.data.model.WsAuthMessage
 import com.xgwnje.visionguard.data.model.WsCommandAck
 import com.xgwnje.visionguard.data.model.WsCommandMessage
@@ -109,7 +108,7 @@ class WebSocketClient {
 
     // ── 事件定义 ─────────────────────────────────────────────
     private sealed class Event {
-        data class Connect(val url: String, val apiKey: String, val deviceId: String) : Event()
+        data class Connect(val url: String, val apiKey: String, val deviceId: String, val deviceName: String) : Event()
         object Disconnect : Event()
         object NetworkAvailable : Event()
         data class WsOpened(val session: Session) : Event()
@@ -126,6 +125,7 @@ class WebSocketClient {
     private var serverUrl: String = ""
     private var apiKey: String = ""
     private var deviceId: String = ""
+    private var deviceName: String = ""
     private var shouldReconnect = false
     private var attempt = 0
     private var pendingBackoffJob: Job? = null
@@ -155,8 +155,8 @@ class WebSocketClient {
     // 对外 API
     // ═════════════════════════════════════════════════════════
 
-    fun connect(serverUrl: String, apiKey: String, deviceId: String) {
-        events.trySend(Event.Connect(serverUrl.trimEnd('/'), apiKey, deviceId))
+    fun connect(serverUrl: String, apiKey: String, deviceId: String, deviceName: String = "Android-Detector") {
+        events.trySend(Event.Connect(serverUrl.trimEnd('/'), apiKey, deviceId, deviceName))
     }
 
     fun disconnect() {
@@ -169,6 +169,21 @@ class WebSocketClient {
 
     fun onNetworkLost() {
         events.trySend(Event.NetworkLost)
+    }
+
+    /** 立即发送一次心跳（用于状态突变后快速同步） */
+    fun sendHeartbeatNow(): Boolean {
+        val s = session ?: return false
+        val hb = WsHeartbeatMessage(
+            deviceId = deviceId,
+            isMonitoring = isMonitoring,
+            isAlarming = isAlarming,
+            isReady = isReady,
+            cooldown = heartbeatCooldown,
+            confidence = heartbeatConfidence,
+            targets = heartbeatTargets
+        )
+        return s.sendNow(gson.toJson(hb))
     }
 
     // ── receiver 端原有 API（detector 端作为命令接收方，通常不主动发送命令） ──
@@ -188,11 +203,6 @@ class WebSocketClient {
     }
 
     // ── detector 端新增 API ──────────────────────────────────
-
-    /** 发送报警消息 */
-    fun sendAlert(alertMessage: WsAlertMessage): Boolean {
-        return session?.ws?.send(gson.toJson(alertMessage)) ?: false
-    }
 
     /** 发送命令回执 */
     fun sendCommandAck(command: String, success: Boolean, reason: String = ""): Boolean {
@@ -266,7 +276,7 @@ class WebSocketClient {
 
     private fun onConnect(e: Event.Connect) {
         // 参数相同且已连接 → 跳过
-        if (e.url == serverUrl && e.apiKey == apiKey && e.deviceId == deviceId
+        if (e.url == serverUrl && e.apiKey == apiKey && e.deviceId == deviceId && e.deviceName == deviceName
             && _state.value == WsState.CONNECTED) {
             Log.i(TAG, "connect 忽略：参数未变且已连接")
             return
@@ -274,6 +284,7 @@ class WebSocketClient {
         serverUrl = e.url
         apiKey = e.apiKey
         deviceId = e.deviceId
+        deviceName = e.deviceName
         shouldReconnect = true
         attempt = 0
 
@@ -327,7 +338,7 @@ class WebSocketClient {
     private fun onWsOpened(e: Event.WsOpened) {
         if (e.session != session) return
         Log.i(TAG, "WS onOpen → 发送认证")
-        val auth = WsAuthMessage(apiKey = apiKey, deviceId = deviceId)
+        val auth = WsAuthMessage(apiKey = apiKey, deviceId = deviceId, deviceName = deviceName)
         e.session.ws.send(gson.toJson(auth))
     }
 
@@ -523,6 +534,15 @@ class WebSocketClient {
                         break
                     }
                 }
+            }
+        }
+
+        fun sendNow(json: String): Boolean {
+            if (shutdown) return false
+            return try {
+                ws.send(json)
+            } catch (_: Exception) {
+                false
             }
         }
 

@@ -137,7 +137,7 @@ namespace VisionGuard.UI
             _clbClasses.Items.Clear();
             _displayed.Clear();
 
-            foreach (string en in CocoClassMap.EnglishNames)
+            foreach (string en in CocoClassMap.TargetClassNames)
             {
                 string zh = CocoClassMap.EnZh.TryGetValue(en, out string z) ? z : string.Empty;
 

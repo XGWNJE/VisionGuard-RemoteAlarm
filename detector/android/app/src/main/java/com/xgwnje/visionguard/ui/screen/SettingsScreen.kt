@@ -17,11 +17,16 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
 import com.xgwnje.visionguard.inference.SocWhitelist
 import androidx.compose.ui.Alignment
@@ -34,7 +39,9 @@ import com.xgwnje.visionguard.data.remote.WsState
 @Composable
 fun SettingsScreen(
     config: MonitorConfig,
+    deviceName: String,
     onConfigChange: (MonitorConfig) -> Unit,
+    onDeviceNameChange: (String) -> Unit,
     connectionState: WsState,
     onReconnect: () -> Unit,
     modifier: Modifier = Modifier
@@ -56,6 +63,16 @@ fun SettingsScreen(
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            // 设备名
+            ConfigSectionTitle(title = "设备名称")
+            OutlinedTextField(
+                value = deviceName,
+                onValueChange = onDeviceNameChange,
+                label = { Text("显示在接收端的名称") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+
             // 模型选择
             ConfigSectionTitle(title = "模型选择")
             Row(
@@ -208,8 +225,8 @@ fun SettingsScreen(
                 Slider(
                     value = (config.cooldownMs / 1000).toFloat(),
                     onValueChange = { onConfigChange(config.copy(cooldownMs = it.toInt() * 1000L)) },
-                    valueRange = 1f..60f,
-                    steps = 58,
+                    valueRange = 1f..300f,
+                    steps = 298,
                     modifier = Modifier.fillMaxWidth()
                 )
                 Text(

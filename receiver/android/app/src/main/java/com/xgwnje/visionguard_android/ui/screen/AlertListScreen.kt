@@ -82,7 +82,7 @@ fun AlertListScreen(
             } else {
                 LazyColumn(modifier = Modifier.fillMaxSize()) {
                     items(
-                        items = alerts.asReversed(),  // 最新在顶
+                        items = alerts.asReversed().filter { it.alertId.isNotEmpty() },  // 最新在顶，过滤非法项
                         key = { it.alertId }
                     ) { alert ->
                         AlertCard(

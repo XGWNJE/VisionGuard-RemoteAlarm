@@ -511,7 +511,7 @@ function handleCommand(senderWs: WebSocket, msg: WsCommand): void {
   }
 
   // 转发给目标检测端（检测端会自行发回带 reason 的 command-ack）
-  const relay: WsCommandRelay = { type: 'command', command: msg.command };
+  const relay: WsCommandRelay = { type: 'command', command: msg.command, targetDeviceId: msg.targetDeviceId };
   const sent = sendJson(target.ws, relay, `command->${msg.targetDeviceId}`);
   console.log(`[ws][${new Date().toISOString()}] 命令转发: command=${msg.command} target=${target.deviceName}(${msg.targetDeviceId}) success=${sent}`);
 
@@ -542,7 +542,7 @@ function handleSetConfig(senderWs: WebSocket, msg: WsSetConfig): void {
   }
 
   // 转发 set-config 给目标检测端
-  const relay: WsSetConfigRelay = { type: 'set-config', key: msg.key, value: msg.value };
+  const relay: WsSetConfigRelay = { type: 'set-config', key: msg.key, value: msg.value, targetDeviceId: msg.targetDeviceId };
   const sent = sendJson(target.ws, relay, `set-config->${msg.targetDeviceId}`);
   console.log(`[ws][${new Date().toISOString()}] 配置更新转发: key=${msg.key} value=${msg.value} target=${target.deviceName}(${msg.targetDeviceId}) success=${sent}`);
 

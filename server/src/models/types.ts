@@ -105,17 +105,19 @@ export interface WsSetConfig {
   value: string;
 }
 
-/** 服务器 → Windows：转发命令 (不含 targetDeviceId) */
+/** 服务器 → 检测端：转发命令 */
 export interface WsCommandRelay {
   type: 'command';
   command: 'pause' | 'resume' | 'stop-alarm';
+  targetDeviceId: string;
 }
 
-/** 服务器 → Windows：转发参数调整 */
+/** 服务器 → 检测端：转发参数调整 */
 export interface WsSetConfigRelay {
   type: 'set-config';
   key: string;
   value: string;
+  targetDeviceId: string;
 }
 
 /** Android → 服务器：请求指定设备的截图（服务器转发给 Windows） */

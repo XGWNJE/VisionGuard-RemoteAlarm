@@ -119,5 +119,11 @@ namespace VisionGuard.Data
             "toaster", "sink", "refrigerator", "book", "clock",
             "vase", "scissors", "teddy bear", "hair drier", "toothbrush",
         };
+
+        /// <summary>与 Android 检测端对齐的 6 类监控目标（COCO 原始顺序子集）</summary>
+        public static readonly List<string> TargetClassNames = new List<string>
+        {
+            "person", "bicycle", "car", "motorcycle", "bus", "truck",
+        };
     }
 }

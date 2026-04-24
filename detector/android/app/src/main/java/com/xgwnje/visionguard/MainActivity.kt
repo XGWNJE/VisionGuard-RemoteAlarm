@@ -161,6 +161,7 @@ private fun MainScreen(
 
     // 从 SettingsRepository 加载初始配置
     var config by remember { mutableStateOf(MonitorConfig()) }
+    var deviceName by remember { mutableStateOf("Android-Detector") }
     var configLoaded by remember { mutableStateOf(false) }
 
     LaunchedEffect(service) {
@@ -171,6 +172,7 @@ private fun MainScreen(
             val model = safeSettingsRepository.getSelectedModel()
             val samplingRate = safeSettingsRepository.getTargetSamplingRate()
             val useHighRes = safeSettingsRepository.getUseHighResolution()
+            val name = safeSettingsRepository.getDeviceName()
             val inputSize = if (useHighRes) 640 else 320
             config = MonitorConfig(
                 confidence = confidence,
@@ -181,6 +183,7 @@ private fun MainScreen(
                 modelName = model,
                 useHighResolution = useHighRes
             )
+            deviceName = name
             configLoaded = true
         }
     }
@@ -197,6 +200,13 @@ private fun MainScreen(
     val actualSamplingRate by service.actualSamplingRate.collectAsState()
     val lastAlertPushTime by service.lastAlertPushTime.collectAsState()
 
+    // 监听 Service 中的远程配置变更，同步到 UI
+    LaunchedEffect(service) {
+        service.currentConfigFlow.collect { remoteConfig ->
+            config = remoteConfig
+        }
+    }
+
     // 保存配置到 DataStore
     val saveConfig: (MonitorConfig) -> Unit = { newConfig ->
         config = newConfig
@@ -210,6 +220,13 @@ private fun MainScreen(
             safeSettingsRepository.setUseHighResolution(newConfig.useHighResolution)
         }
         Unit
+    }
+
+    val saveDeviceName: (String) -> Unit = { newName ->
+        deviceName = newName
+        scope.launch {
+            safeSettingsRepository.setDeviceName(newName)
+        }
     }
 
     val navController = rememberNavController()
@@ -279,7 +296,9 @@ private fun MainScreen(
             composable("settings") {
                 SettingsScreen(
                     config = config,
+                    deviceName = deviceName,
                     onConfigChange = saveConfig,
+                    onDeviceNameChange = saveDeviceName,
                     connectionState = connectionState,
                     onReconnect = { service.reconnect() }
                 )

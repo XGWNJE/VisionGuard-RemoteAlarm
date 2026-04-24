@@ -28,12 +28,17 @@ import com.xgwnje.visionguard_android.data.remote.WsState
 import com.xgwnje.visionguard_android.data.repository.SettingsRepository
 import com.xgwnje.visionguard_android.util.NotificationHelper
 import android.util.Base64
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import java.io.File
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 private const val TAG = "VG_FgService"
@@ -67,6 +72,11 @@ class AlertForegroundService : LifecycleService() {
     private var wakeLock: PowerManager.WakeLock? = null
     private lateinit var screenshotCache: ScreenshotCache
     private lateinit var networkMonitor: NetworkMonitor  // 网络状态监听
+
+    private val httpClient = OkHttpClient.Builder()
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
+        .build()
 
     // ── 设备参数缓存（记录每台设备最后下发的值）──────────────
     private val deviceConfigs = mutableMapOf<String, DeviceConfig>()
@@ -131,6 +141,12 @@ class AlertForegroundService : LifecycleService() {
             wsClient.onAlert.collect { alert ->
                 Log.i(TAG, "收到报警: ${alert.deviceName} - ${alert.detections.size} 个目标")
                 _alerts.value = (_alerts.value + alert).takeLast(200)
+
+                // Android 检测端报警：通过 HTTP 下载截图并存入缓存
+                if (alert.screenshotUrl.isNotEmpty()) {
+                    downloadScreenshot(alert.alertId, alert.screenshotUrl)
+                }
+
                 sendAlertNotification(alert)
             }
         }
@@ -236,9 +252,49 @@ class AlertForegroundService : LifecycleService() {
     /** 查询截图缓存文件，未缓存返回 null */
     fun getScreenshotFile(alertId: String): File? = screenshotCache.getFile(alertId)
 
+    /** 从服务器 HTTP 下载截图并缓存（Android 检测端报警用） */
+    private suspend fun downloadScreenshot(alertId: String, screenshotUrl: String) {
+        val url = if (screenshotUrl.startsWith("http")) screenshotUrl
+        else "${AppConstants.SERVER_URL}$screenshotUrl"
+        val request = Request.Builder()
+            .url(url)
+            .header("X-API-Key", AppConstants.API_KEY)
+            .build()
+
+        Log.d(TAG, "开始下载截图: alertId=$alertId url=$url")
+        try {
+            withContext(Dispatchers.IO) {
+                httpClient.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) {
+                        val bytes = response.body?.bytes()
+                        if (bytes != null && bytes.isNotEmpty()) {
+                            screenshotCache.save(alertId, bytes)
+                            // 同时推送到 onScreenshotData，供 AlertDetailScreen 即时显示
+                            val base64 = Base64.encodeToString(bytes, Base64.DEFAULT)
+                            _onScreenshotData.emit(
+                                ScreenshotData(alertId, base64, 0, 0)
+                            )
+                            Log.i(TAG, "截图已下载: alertId=$alertId size=${bytes.size}")
+                        }
+                    } else {
+                        Log.w(TAG, "截图下载失败: ${response.code} ${response.message} url=$url")
+                    }
+                }
+            }
+            // 触发 UI 重组，列表/详情页读取新缓存文件
+            _alerts.value = _alerts.value.toList()
+        } catch (e: Exception) {
+            Log.w(TAG, "截图下载异常: alertId=$alertId ${e.message}", e)
+        }
+    }
+
     // ── 通知发送 ──────────────────────────────────────────────
 
     private fun sendAlertNotification(alert: AlertMessage) {
+        if (alert.alertId.isEmpty() || alert.deviceId.isEmpty()) {
+            Log.w(TAG, "报警消息缺少 alertId 或 deviceId，跳过通知")
+            return
+        }
         val notifId = notifIdCounter.incrementAndGet()
         val notif = NotificationHelper.buildAlertNotification(
             this@AlertForegroundService, alert, notifId, null

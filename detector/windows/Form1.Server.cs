@@ -288,7 +288,7 @@ namespace VisionGuard
                     if (float.TryParse(value,
                         System.Globalization.NumberStyles.Float,
                         System.Globalization.CultureInfo.InvariantCulture,
-                        out float conf) && conf >= 0.1f && conf <= 0.99f)
+                        out float conf) && conf >= 0.1f && conf <= 0.95f)
                     {
                         int pct = (int)(conf * 100);
                         _trkThreshold.Value = Math.Max(_trkThreshold.Minimum,
@@ -301,7 +301,7 @@ namespace VisionGuard
                     }
                     else
                     {
-                        _serverPushService.SendCommandAck("set-config:confidence", false, "值无效（0.1-0.99）");
+                        _serverPushService.SendCommandAck("set-config:confidence", false, "值无效（0.1-0.95）");
                     }
                     break;
 

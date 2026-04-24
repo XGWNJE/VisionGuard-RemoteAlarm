@@ -139,11 +139,11 @@ namespace VisionGuard
             _pageCapture.Controls.Add(MakeTitle("监控控制", PadX, ref y, fh));
 
             // 开始 / 停止
-            _btnStart = MakePageBtn(_pageCapture, "▶  开  始",
+            _btnStart = MakePageBtn(_pageCapture, "▶ 开始监控",
                 Color.FromArgb(0, 120, 212), Color.FromArgb(16, 110, 190), PadX, BtnH + 4, ref y);
             _btnStart.PressColor = Color.FromArgb(0, 90, 170);
             y += RowGap;
-            _btnStop = MakePageBtn(_pageCapture, "■  停  止",
+            _btnStop = MakePageBtn(_pageCapture, "■ 停止监控",
                 Color.FromArgb(58, 58, 58), Color.FromArgb(72, 72, 72), PadX, BtnH + 4, ref y);
             _btnStop.Enabled = false;
         }
@@ -169,7 +169,7 @@ namespace VisionGuard
                 Left = PadX, Top = y, Height = sliderH,
                 Width = _pageParams.ClientSize.Width - PadX * 2,
                 Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top,
-                Minimum = 10, Maximum = 90, Value = 45
+                Minimum = 10, Maximum = 95, Value = 45
             };
             _pageParams.Controls.Add(_trkThreshold);
             y += sliderH + RowGap;

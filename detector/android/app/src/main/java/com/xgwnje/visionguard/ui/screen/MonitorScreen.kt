@@ -13,10 +13,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.xgwnje.visionguard.data.model.MonitorConfig
 import com.xgwnje.visionguard.data.remote.WsState
@@ -78,7 +78,7 @@ fun MonitorScreen(
                     .fillMaxWidth()
                     .height(56.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = if (isMonitoring) Color(0xFFF44336) else Color(0xFF4CAF50)
+                    containerColor = if (isMonitoring) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
                 ),
                 enabled = isReady
             ) {
@@ -89,15 +89,11 @@ fun MonitorScreen(
             }
 
             // 手动预览按钮：无目标时辅助确认摄像头视角
-            Button(
+            OutlinedButton(
                 onClick = onRequestSnapshot,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(48.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer
-                ),
                 enabled = isMonitoring
             ) {
                 Text(

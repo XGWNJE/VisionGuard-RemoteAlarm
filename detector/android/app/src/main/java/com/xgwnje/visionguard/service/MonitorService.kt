@@ -167,12 +167,12 @@ class MonitorService(
 
         // ── 路径 1：未启动或已暂停 ──
         if (!_isRunning.value) {
-            Log.e(TAG, "[SKIP] !isRunning → close ImageProxy")
+            Log.d(TAG, "[SKIP] !isRunning → close ImageProxy")
             imageProxy.close()
             return
         }
         if (paused) {
-            Log.e(TAG, "[SKIP] paused → close ImageProxy")
+            Log.d(TAG, "[SKIP] paused → close ImageProxy")
             imageProxy.close()
             return
         }
@@ -188,7 +188,7 @@ class MonitorService(
 
         // ── 路径 3：防重入 ──
         if (processing.getAndSet(true)) {
-            Log.e(TAG, "[SKIP] processing=true → close ImageProxy")
+            Log.d(TAG, "[SKIP] processing=true → close ImageProxy")
             imageProxy.close()
             return
         }

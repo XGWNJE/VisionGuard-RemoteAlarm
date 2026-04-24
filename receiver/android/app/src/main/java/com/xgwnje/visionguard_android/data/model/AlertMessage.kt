@@ -7,10 +7,10 @@ package com.xgwnje.visionguard_android.data.model
 // └─────────────────────────────────────────────────────────┘
 
 data class BoundingBox(
-    val x: Int = 0,
-    val y: Int = 0,
-    val w: Int = 0,
-    val h: Int = 0
+    val x: Float = 0f,
+    val y: Float = 0f,
+    val w: Float = 0f,
+    val h: Float = 0f
 )
 
 data class Detection(
@@ -20,11 +20,11 @@ data class Detection(
 )
 
 data class AlertMessage(
-    val alertId: String,
-    val deviceId: String,
-    val deviceName: String,
-    val timestamp: String,           // ISO 8601
-    val detections: List<Detection>,
+    val alertId: String = "",        // Gson 解析缺失字段时防 NPE
+    val deviceId: String = "",
+    val deviceName: String = "",
+    val timestamp: String = "",      // ISO 8601
+    val detections: List<Detection> = emptyList(),
     val screenshotUrl: String = "",  // 已废弃，保留兼容（Windows 不再发此字段）
     val screenshotData: ScreenshotData? = null,
     val timings: Map<String, Long>? = null,

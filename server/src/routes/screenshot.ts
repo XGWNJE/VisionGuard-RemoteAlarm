@@ -17,8 +17,8 @@ const router = Router();
  * 返回截图 PNG 文件
  */
 router.get('/screenshots/:filename', (req: Request, res: Response) => {
-  // 鉴权 (query param)
-  const key = String(req.query.key ?? '');
+  // 鉴权：支持 query param ?key= 或 header X-API-Key
+  const key = String(req.query.key ?? req.headers['x-api-key'] ?? '');
   if (!key || key !== config.apiKey) {
     res.status(401).json({ ok: false, error: 'unauthorized' });
     return;

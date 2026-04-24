@@ -47,7 +47,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.ByteArrayOutputStream
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import kotlin.math.max
@@ -75,6 +74,10 @@ class DetectorForegroundService : LifecycleService() {
     /** 最近推送报警的时间戳（受冷却期控制，仅实际推送时更新） */
     private val _lastAlertPushTime = MutableStateFlow<String?>(null)
     val lastAlertPushTime: StateFlow<String?> = _lastAlertPushTime.asStateFlow()
+
+    /** 当前配置（供 UI 同步远程变更） */
+    private val _currentConfigFlow = MutableStateFlow(MonitorConfig())
+    val currentConfigFlow: StateFlow<MonitorConfig> = _currentConfigFlow.asStateFlow()
 
     // ── 核心组件 ──────────────────────────────────────────────
     private lateinit var settingsRepo: SettingsRepository
@@ -311,6 +314,7 @@ class DetectorForegroundService : LifecycleService() {
                 }
 
                 currentConfig = config
+                _currentConfigFlow.value = config
                 monitorService.updateConfig(config)
                 updateWsHeartbeatStatus()
 
@@ -451,13 +455,16 @@ class DetectorForegroundService : LifecycleService() {
     }
 
     private fun unbindCameraX() {
-        try {
-            cameraProvider?.unbindAll()
-            imageAnalysis?.clearAnalyzer()
-            imageAnalysis = null
-            Log.i(TAG, "CameraX 已解绑")
-        } catch (e: Exception) {
-            Log.w(TAG, "解绑 CameraX 异常", e)
+        // CameraX 生命周期操作必须在主线程执行
+        androidx.core.content.ContextCompat.getMainExecutor(this).execute {
+            try {
+                cameraProvider?.unbindAll()
+                imageAnalysis?.clearAnalyzer()
+                imageAnalysis = null
+                Log.i(TAG, "CameraX 已解绑")
+            } catch (e: Exception) {
+                Log.w(TAG, "解绑 CameraX 异常", e)
+            }
         }
     }
 
@@ -472,11 +479,10 @@ class DetectorForegroundService : LifecycleService() {
         _lastAlertPushTime.value = timeStr
         Log.i(TAG, "报警已推送: $timeStr, targets=${event.detections.map { it.label }}")
 
-        // 发送报警到服务器
+        // 发送报警到服务器（HTTP POST multipart，与 Windows 对齐）
         serviceScope.launch {
             try {
-                val base64Image = event.renderedFrame?.let { bitmapToBase64Jpeg(it) } ?: ""
-                serverPushService.sendAlert(event, base64Image)
+                serverPushService.sendAlert(event, event.renderedFrame)
             } catch (e: Exception) {
                 Log.e(TAG, "发送报警失败", e)
             }
@@ -490,18 +496,6 @@ class DetectorForegroundService : LifecycleService() {
         }
     }
 
-    private fun bitmapToBase64Jpeg(bitmap: Bitmap): String {
-        return try {
-            val stream = ByteArrayOutputStream()
-            bitmap.compress(Bitmap.CompressFormat.JPEG, 85, stream)
-            val bytes = stream.toByteArray()
-            android.util.Base64.encodeToString(bytes, android.util.Base64.DEFAULT)
-        } catch (e: Exception) {
-            Log.e(TAG, "Bitmap 转 Base64 失败", e)
-            ""
-        }
-    }
-
     // ═════════════════════════════════════════════════════════
     // 远程命令处理
     // ═════════════════════════════════════════════════════════
@@ -510,17 +504,20 @@ class DetectorForegroundService : LifecycleService() {
         Log.i(TAG, "收到远程命令: ${command.command}")
         when (command.command) {
             "pause" -> {
-                monitorService.pause()
+                // 与本地停止监控对齐：解绑 CameraX、停止 MonitorService
+                stopMonitoring()
                 serverPushService.sendCommandAck("pause", true)
+                // 立即推送心跳，让接收端快速同步状态
+                serverPushService.wsClient.sendHeartbeatNow()
             }
             "resume" -> {
-                monitorService.resume()
+                // 与本地开始监控对齐：加载模型（如需）、绑定 CameraX
+                if (!isMonitoring.value) {
+                    startMonitoring(currentConfig)
+                }
                 serverPushService.sendCommandAck("resume", true)
-            }
-            "stop-alarm" -> {
-                // 停止当前报警状态
-                serverPushService.wsClient.isAlarming = false
-                serverPushService.sendCommandAck("stop-alarm", true)
+                // 立即推送心跳，让接收端快速同步状态
+                serverPushService.wsClient.sendHeartbeatNow()
             }
             else -> {
                 Log.w(TAG, "未知命令: ${command.command}")
@@ -535,13 +532,21 @@ class DetectorForegroundService : LifecycleService() {
             try {
                 when (configMsg.key) {
                     "cooldown" -> {
-                        val value = configMsg.value.toIntOrNull() ?: return@launch
+                        val raw = configMsg.value.toIntOrNull() ?: return@launch
+                        val value = raw.coerceIn(1, 300)
+                        if (value != raw) {
+                            Log.w(TAG, "cooldown 值 $raw 超出范围，已裁剪为 $value")
+                        }
                         settingsRepo.setCooldown(value)
                         val newConfig = currentConfig.copy(cooldownMs = value * 1000L)
                         updateConfig(newConfig)
                     }
                     "confidence" -> {
-                        val value = configMsg.value.toFloatOrNull() ?: return@launch
+                        val raw = configMsg.value.toFloatOrNull() ?: return@launch
+                        val value = raw.coerceIn(0.1f, 0.95f)
+                        if (value != raw) {
+                            Log.w(TAG, "confidence 值 $raw 超出范围，已裁剪为 $value")
+                        }
                         settingsRepo.setConfidence(value)
                         val newConfig = currentConfig.copy(confidence = value)
                         updateConfig(newConfig)

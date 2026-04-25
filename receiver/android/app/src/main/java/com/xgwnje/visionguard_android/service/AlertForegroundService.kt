@@ -115,7 +115,7 @@ class AlertForegroundService : LifecycleService() {
         )
         wakeLock?.acquire(30 * 60 * 1000L)
 
-        // 订阅 WS 状态 → 更新前台通知 + 续期 WakeLock
+        // 订阅 WS 状态 → 更新前台通知 + 续期 WakeLock + 连接成功后拉取历史
         lifecycleScope.launch {
             wsClient.connectionState.collect { state ->
                 // 每次状态变化时续期 WakeLock（防止 30 分钟超时释放）
@@ -133,6 +133,12 @@ class AlertForegroundService : LifecycleService() {
                     NotificationHelper.FOREGROUND_NOTIF_ID,
                     NotificationHelper.buildForegroundNotification(this@AlertForegroundService, stateText)
                 )
+
+                // 连接成功后拉取历史报警（取最近 7 天内）
+                if (state == WsState.CONNECTED) {
+                    val since = System.currentTimeMillis() - 7L * 24 * 60 * 60 * 1000
+                    fetchHistoryAlerts(since)
+                }
             }
         }
 
@@ -140,13 +146,9 @@ class AlertForegroundService : LifecycleService() {
         lifecycleScope.launch {
             wsClient.onAlert.collect { alert ->
                 Log.i(TAG, "收到报警: ${alert.deviceName} - ${alert.detections.size} 个目标")
-                _alerts.value = (_alerts.value + alert).takeLast(200)
+                _alerts.value = (listOf(alert) + _alerts.value).take(200)
 
-                // Android 检测端报警：通过 HTTP 下载截图并存入缓存
-                if (alert.screenshotUrl.isNotEmpty()) {
-                    downloadScreenshot(alert.alertId, alert.screenshotUrl)
-                }
-
+                // 不再自动下载截图：截图按需从检测端 WS 拉取
                 sendAlertNotification(alert)
             }
         }
@@ -252,7 +254,51 @@ class AlertForegroundService : LifecycleService() {
     /** 查询截图缓存文件，未缓存返回 null */
     fun getScreenshotFile(alertId: String): File? = screenshotCache.getFile(alertId)
 
-    /** 从服务器 HTTP 下载截图并缓存（Android 检测端报警用） */
+    /** 从服务器拉取历史报警列表 */
+    suspend fun fetchHistoryAlerts(since: Long = 0): Boolean {
+        val url = "${AppConstants.SERVER_URL}/api/alerts?since=$since&limit=200"
+        val request = Request.Builder()
+            .url(url)
+            .header("X-API-Key", AppConstants.API_KEY)
+            .build()
+
+        return try {
+            withContext(Dispatchers.IO) {
+                httpClient.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) {
+                        val body = response.body?.string()
+                        if (!body.isNullOrEmpty()) {
+                            val json = com.google.gson.JsonParser.parseString(body).asJsonObject
+                            if (json.get("ok")?.asBoolean == true) {
+                                val alertsArr = json.getAsJsonArray("alerts")
+                                val gson = com.google.gson.Gson()
+                                val history = alertsArr?.map {
+                                    gson.fromJson(it, AlertMessage::class.java)
+                                } ?: emptyList()
+                                // 合并到现有列表，去重（按 alertId）
+                                val existingIds = _alerts.value.map { it.alertId }.toSet()
+                                val newAlerts = history.filter { it.alertId !in existingIds }
+                                if (newAlerts.isNotEmpty()) {
+                                    val merged = (newAlerts + _alerts.value).distinctBy { it.alertId }
+                                    _alerts.value = merged.take(200)
+                                    Log.i(TAG, "历史报警已同步: ${newAlerts.size} 条")
+                                }
+                                true
+                            } else false
+                        } else false
+                    } else {
+                        Log.w(TAG, "历史报警拉取失败: ${response.code}")
+                        false
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "历史报警拉取异常: ${e.message}")
+            false
+        }
+    }
+
+    /** 从服务器 HTTP 下载截图并缓存（保留作为 fallback） */
     private suspend fun downloadScreenshot(alertId: String, screenshotUrl: String) {
         val url = if (screenshotUrl.startsWith("http")) screenshotUrl
         else "${AppConstants.SERVER_URL}$screenshotUrl"

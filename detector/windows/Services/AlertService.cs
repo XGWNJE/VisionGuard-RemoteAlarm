@@ -1,10 +1,9 @@
 // ┌─────────────────────────────────────────────────────────┐
 // │ AlertService.cs                                         │
-// │ 角色：报警判定（冷却逻辑）                              │
+// │ 角色：报警判定（冷却逻辑）+ 截图本地缓存管理              │
 // │ 依赖：无（纯逻辑层）                                    │
-// │ 对外 API：Evaluate(), IsAlarming                        │
-// │ 事件：AlertTriggered                                     │
-// │ 说明：所有通知逻辑由 Android 端处理                      │
+// │ 对外 API：Evaluate(), IsAlarming, GetSnapshotPath()      │
+// │ 缓存策略：1GB / 7天 / 5000张上限，LRU 清理               │
 // └─────────────────────────────────────────────────────────┘
 using System;
 using System.Collections.Generic;
@@ -30,6 +29,11 @@ namespace VisionGuard.Services
         // ── 冷却（全局，以时间为基准）────────────────────────────────
         private DateTime _lastAlertTime = DateTime.MinValue;
         private readonly object _cooldownLock = new object();
+
+        // ── 缓存约束 ─────────────────────────────────────────────────
+        private const long MAX_CACHE_SIZE_BYTES = 1024L * 1024 * 1024; // 1 GB
+        private const int MAX_CACHE_COUNT = 5000;
+        private const long MAX_CACHE_AGE_MS = 7L * 24 * 60 * 60 * 1000; // 7 天
 
         private bool _disposed;
 
@@ -93,7 +97,7 @@ namespace VisionGuard.Services
         /// <summary>保留空方法（调用方兼容）</summary>
         public void StopAlarm() { }
 
-        // ── 辅助 ─────────────────────────────────────────────────────
+        // ── 截图缓存管理 ─────────────────────────────────────────────
 
         private static void TrySaveSnapshot(Bitmap bmp, string alertId)
         {
@@ -107,6 +111,9 @@ namespace VisionGuard.Services
                 string filename = alertId + ".png";
                 string path     = Path.Combine(dir, filename);
                 bmp.Save(path, System.Drawing.Imaging.ImageFormat.Png);
+
+                // 保存后执行缓存约束清理
+                CleanupCache(dir);
             }
             catch { }
         }
@@ -118,6 +125,68 @@ namespace VisionGuard.Services
         {
             string dir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "alerts");
             return Path.Combine(dir, alertId + ".png");
+        }
+
+        /// <summary>
+        /// 清理截图缓存：满足 1GB / 7天 / 5000张 约束（LRU）。
+        /// </summary>
+        private static void CleanupCache(string dir)
+        {
+            try
+            {
+                if (!Directory.Exists(dir)) return;
+
+                var files = new DirectoryInfo(dir)
+                    .GetFiles("*.png")
+                    .Where(f => f.Length > 0)
+                    .ToList();
+
+                if (files.Count == 0) return;
+
+                var now = DateTime.Now;
+                long totalSize = files.Sum(f => f.Length);
+                int removed = 0;
+
+                // 1. 按时间清理：删除超过 7 天的文件
+                var expired = files.Where(f => (now - f.LastWriteTime).TotalMilliseconds > MAX_CACHE_AGE_MS).ToList();
+                foreach (var f in expired)
+                {
+                    try { f.Delete(); removed++; } catch { }
+                }
+                if (removed > 0)
+                {
+                    files = files.Except(expired.Where(f => !f.Exists)).ToList();
+                    totalSize = files.Sum(f => f.Length);
+                }
+
+                // 2. 按条数清理：超出 5000 条时删除最旧的
+                if (files.Count > MAX_CACHE_COUNT)
+                {
+                    var toDelete = files.OrderBy(f => f.LastWriteTime).Take(files.Count - MAX_CACHE_COUNT);
+                    foreach (var f in toDelete)
+                    {
+                        try { f.Delete(); removed++; totalSize -= f.Length; } catch { }
+                    }
+                    files = files.Except(toDelete.Where(f => !f.Exists)).ToList();
+                }
+
+                // 3. 按大小清理：超出 1GB 时删除最旧的
+                if (totalSize > MAX_CACHE_SIZE_BYTES)
+                {
+                    var sorted = files.OrderBy(f => f.LastWriteTime).ToList();
+                    foreach (var f in sorted)
+                    {
+                        if (totalSize <= MAX_CACHE_SIZE_BYTES) break;
+                        try { f.Delete(); removed++; totalSize -= f.Length; } catch { }
+                    }
+                }
+
+                if (removed > 0)
+                {
+                    LogManager.StaticInfo($"[AlertService] 截图缓存清理完成: 删除 {removed} 个文件");
+                }
+            }
+            catch { /* 清理失败不阻塞报警流程 */ }
         }
 
         public void Dispose()

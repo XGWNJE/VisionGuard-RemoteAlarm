@@ -53,6 +53,7 @@ import androidx.compose.ui.unit.sp
 import com.xgwnje.visionguard_android.data.model.AlertMessage
 import com.xgwnje.visionguard_android.data.model.cocoLabelZh
 import com.xgwnje.visionguard_android.service.AlertForegroundService
+import com.xgwnje.visionguard_android.ui.component.formatTimestamp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -190,7 +191,7 @@ fun AlertDetailScreen(
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = alert.timestamp,
+                    text = formatTimestamp(alert.timestamp),
                     fontSize = 13.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

@@ -68,6 +68,11 @@ namespace VisionGuard.Services
 
         private bool _disposed;
 
+        // 网络变化防抖：30 秒内只处理一次，且只在从"无网络"变为"有网络"时才重连
+        private DateTime _lastNetworkChangeHandled = DateTime.MinValue;
+        private bool _lastNetworkWasAvailable = false;
+        private static readonly TimeSpan NetworkChangeDebounce = TimeSpan.FromSeconds(30);
+
         public bool IsConnected => _state == WsState.Connected;
 
         public ServerPushService()
@@ -82,21 +87,34 @@ namespace VisionGuard.Services
         private void OnSystemNetworkChanged(object sender, EventArgs e)
         {
             if (_disposed || !_shouldReconnect) return;
+
+            // 防抖：30 秒内不重复处理
+            var now = DateTime.Now;
+            if (now - _lastNetworkChangeHandled < NetworkChangeDebounce)
+                return;
+
             // 检查是否有可用网络
             bool hasNetwork;
             try { hasNetwork = NetworkInterface.GetIsNetworkAvailable(); }
             catch { hasNetwork = false; }
 
-            if (hasNetwork)
+            if (hasNetwork && !_lastNetworkWasAvailable)
             {
-                LogManager.StaticInfo("[Server] 系统网络变化 → 立即重连");
+                // 从"无网络"变为"有网络"：触发重连
+                _lastNetworkChangeHandled = now;
+                _lastNetworkWasAvailable = true;
+                LogManager.StaticInfo("[Server] 网络恢复 → 立即重连");
                 Post(OnNetworkChanged);
             }
-            else
+            else if (!hasNetwork && _lastNetworkWasAvailable)
             {
-                LogManager.StaticInfo("[Server] 系统网络断开 → 关闭当前会话");
+                // 从"有网络"变为"无网络"：关闭会话
+                _lastNetworkChangeHandled = now;
+                _lastNetworkWasAvailable = false;
+                LogManager.StaticInfo("[Server] 网络断开 → 关闭当前会话");
                 Post(OnNetworkLost);
             }
+            // 状态未变化：静默忽略（避免日志刷屏）
         }
 
         private void Post(Action action)

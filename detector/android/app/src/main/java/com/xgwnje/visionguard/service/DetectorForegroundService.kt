@@ -38,6 +38,8 @@ import com.xgwnje.visionguard.inference.YoloOutputParser
 import com.xgwnje.visionguard.util.LogManager
 import com.xgwnje.visionguard.util.NotificationHelper
 import com.xgwnje.visionguard.util.NtpSync
+import com.xgwnje.visionguard.util.ScreenshotCache
+import android.util.Base64
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -83,6 +85,7 @@ class DetectorForegroundService : LifecycleService() {
     private lateinit var settingsRepo: SettingsRepository
     private lateinit var serverPushService: ServerPushService
     private lateinit var networkMonitor: NetworkMonitor
+    private lateinit var screenshotCache: ScreenshotCache
 
     private lateinit var inferenceEngine: OnnxInferenceEngine
     private lateinit var preprocessor: ImagePreprocessor
@@ -127,6 +130,7 @@ class DetectorForegroundService : LifecycleService() {
         settingsRepo = SettingsRepository(this)
         serverPushService = ServerPushService(this, settingsRepo, serviceScope)
         networkMonitor = NetworkMonitor(this)
+        screenshotCache = ScreenshotCache(this)
 
         // 3. 初始化推理引擎
         inferenceEngine = OnnxInferenceEngine(this)
@@ -376,10 +380,17 @@ class DetectorForegroundService : LifecycleService() {
             }
         }
 
-        // 订阅报警事件 → 服务器推送（受冷却期控制）
+        // 订阅报警事件 → 本地缓存截图 + WS 轻量推送（受冷却期控制）
         serviceScope.launch {
             alertService.alertEvents.collect { event ->
                 onAlertEvent(event)
+            }
+        }
+
+        // 订阅截图请求 → 从本地缓存读取并推送
+        serviceScope.launch {
+            serverPushService.wsClient.onRequestScreenshot.collect { alertId ->
+                handleScreenshotRequest(alertId)
             }
         }
 
@@ -473,26 +484,48 @@ class DetectorForegroundService : LifecycleService() {
     // ═════════════════════════════════════════════════════════
 
     private fun onAlertEvent(event: AlertEvent) {
-        // 记录推送时间（仅在实际推送报警时更新）
+        val alertId = java.util.UUID.randomUUID().toString()
         val timeStr = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault())
             .format(java.util.Date())
         _lastAlertPushTime.value = timeStr
-        Log.i(TAG, "报警已推送: $timeStr, targets=${event.detections.map { it.label }}")
+        Log.i(TAG, "报警已触发: alertId=$alertId, targets=${event.detections.map { it.label }}")
 
-        // 发送报警到服务器（HTTP POST multipart，与 Windows 对齐）
-        serviceScope.launch {
-            try {
-                serverPushService.sendAlert(event, event.renderedFrame)
-            } catch (e: Exception) {
-                Log.e(TAG, "发送报警失败", e)
-            }
+        // 1. 保存截图到本地缓存（供后续 request-screenshot 响应使用）
+        event.renderedFrame?.let { bmp ->
+            screenshotCache.save(alertId, bmp)
         }
 
-        // 更新心跳状态
+        // 2. 发送轻量 WS alert（无截图数据，模仿 Windows PushAlert）
+        serverPushService.pushAlert(alertId, event.detections)
+
+        // 3. 更新心跳状态
         serverPushService.wsClient.isAlarming = true
         serviceScope.launch {
             delay(currentConfig.cooldownMs)
             serverPushService.wsClient.isAlarming = false
+        }
+    }
+
+    /** 响应接收端的截图请求：从本地缓存读取并 base64 推送 */
+    private fun handleScreenshotRequest(alertId: String) {
+        serviceScope.launch {
+            try {
+                val bytes = screenshotCache.readBytes(alertId)
+                if (bytes == null) {
+                    Log.w(TAG, "截图请求: 本地缓存未命中 alertId=$alertId")
+                    return@launch
+                }
+                val base64 = Base64.encodeToString(bytes, Base64.DEFAULT)
+                // 估算宽高（从 JPEG 解析太复杂，简单估算或设为 0）
+                val sent = serverPushService.wsClient.sendScreenshotData(alertId, base64, 0, 0)
+                if (sent) {
+                    Log.i(TAG, "截图已推送: alertId=$alertId size=${bytes.size}B")
+                } else {
+                    Log.w(TAG, "截图推送失败: WS 未连接 alertId=$alertId")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "处理截图请求异常: alertId=$alertId", e)
+            }
         }
     }
 

@@ -11,9 +11,11 @@ import express from 'express';
 import { WebSocketServer } from 'ws';
 import { config, validateConfig } from './config';
 import alertRouter from './routes/alert';
+import alertsQueryRouter from './routes/alerts';
 import screenshotRouter from './routes/screenshot';
 import { handleConnection, initPing } from './services/ConnectionManager';
 import { startCleanupTimer } from './services/ScreenshotCleanup';
+import { cleanupExpiredAlerts } from './services/AlertStore';
 
 // ── 加载 .env (简易实现，无需 dotenv 依赖) ─────────────────
 import fs from 'fs';
@@ -50,6 +52,7 @@ app.get('/health', (_req, res) => {
 
 // 路由
 app.use(alertRouter);
+app.use(alertsQueryRouter);
 app.use(screenshotRouter);
 
 // ── HTTP + WebSocket 服务器 ────────────────────────────────
@@ -70,9 +73,15 @@ fs.mkdirSync(config.screenshotDir, { recursive: true });
 // 启动截图清理定时器
 startCleanupTimer();
 
+// 启动报警记录 TTL 清理定时器（每 30 分钟）
+setInterval(cleanupExpiredAlerts, 30 * 60 * 1000);
+cleanupExpiredAlerts(); // 启动时立即执行一次
+
 server.listen(config.port, () => {
   console.log(`[server] VisionGuard Server 已启动`);
   console.log(`[server] HTTP + WS 监听端口: ${config.port}`);
+  console.log(`[server] HTTP 截图上传: ${config.enableHttpScreenshotUpload ? '开启' : '关闭（纯 WS 按需模型）'}`);
   console.log(`[server] 截图目录: ${config.screenshotDir}`);
   console.log(`[server] 截图 TTL: ${config.screenshotTtlHours} 小时`);
+  console.log(`[server] 报警记录 TTL: ${config.alertTtlHours} 小时`);
 });

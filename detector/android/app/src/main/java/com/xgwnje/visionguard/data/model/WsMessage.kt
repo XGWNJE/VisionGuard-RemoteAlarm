@@ -20,7 +20,7 @@ data class WsAuthMessage(
     val role: String = "android-detector",
     val deviceId: String,
     val deviceName: String = "Android-Detector",
-    val version: String = "3.5.0"
+    val version: String = "3.5.1"
 )
 
 /** 服务器 → Android-detector：认证结果 */
@@ -74,6 +74,17 @@ data class WsHeartbeatMessage(
     val cooldown: Int = 5,
     val confidence: Double = 0.45,
     val targets: String = ""
+)
+
+/** Android-detector / Windows → 服务器：轻量报警通知（无截图数据） */
+data class WsAlertMessage(
+    val type: String = "alert",
+    val alertId: String,
+    val deviceId: String,
+    val deviceName: String,
+    val timestamp: String,
+    val detections: List<JsonObject> = emptyList(),
+    val timings: Map<String, Long> = emptyMap()
 )
 
 /** Android-detector → 服务器：日志上报 */

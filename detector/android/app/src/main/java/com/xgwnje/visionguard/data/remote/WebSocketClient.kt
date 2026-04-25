@@ -87,6 +87,10 @@ class WebSocketClient {
     private val _onSetConfig = MutableSharedFlow<WsSetConfigMessage>(extraBufferCapacity = 8)
     val onSetConfig: SharedFlow<WsSetConfigMessage> = _onSetConfig
 
+    // detector 端新增：接收截图请求（接收端 request-screenshot 经服务器转发）
+    private val _onRequestScreenshot = MutableSharedFlow<String>(extraBufferCapacity = 8)
+    val onRequestScreenshot: SharedFlow<String> = _onRequestScreenshot
+
     // ── 运行状态（供心跳上报使用） ───────────────────────────
     @Volatile
     var isMonitoring: Boolean = false
@@ -237,6 +241,11 @@ class WebSocketClient {
             timestamp = isoNow()
         )
         return session?.ws?.send(gson.toJson(msg)) ?: false
+    }
+
+    /** 发送原始 JSON（用于 pushAlert 等自定义消息） */
+    fun sendRawJson(json: String): Boolean {
+        return session?.ws?.send(json) ?: false
     }
 
     // ═════════════════════════════════════════════════════════
@@ -612,6 +621,13 @@ class WebSocketClient {
                     val config = gson.fromJson(text, WsSetConfigMessage::class.java)
                     scope.launch { _onSetConfig.emit(config) }
                 }
+                // detector 端新增：接收截图请求（接收端 request-screenshot 经服务器转发）
+                "request-screenshot" -> {
+                    val alertId = obj.get("alertId")?.asString ?: ""
+                    if (alertId.isNotEmpty()) {
+                        scope.launch { _onRequestScreenshot.emit(alertId) }
+                    }
+                }
             }
         } catch (e: Exception) {
             Log.w(TAG, "消息解析失败: ${e.message}")
@@ -623,8 +639,7 @@ class WebSocketClient {
     // ═════════════════════════════════════════════════════════
 
     private fun isoNow(): String {
-        val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US)
-        sdf.timeZone = TimeZone.getTimeZone("UTC")
+        val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSXXX", Locale.US)
         return sdf.format(Date())
     }
 }

@@ -172,6 +172,50 @@ class ServerPushService(
     }
 
     /**
+     * 发送轻量报警通知（WS，无截图数据）。
+     * 截图由检测端本地缓存，接收端按需通过 request-screenshot 拉取。
+     *
+     * @param alertId 报警 ID
+     * @param detections 检测结果
+     * @param timings 链路耗时统计
+     */
+    fun pushAlert(alertId: String, detections: List<com.xgwnje.visionguard.data.model.Detection>, timings: Map<String, Long> = emptyMap()) {
+        scope.launch {
+            val deviceId = settingsRepo.ensureDeviceId()
+            val deviceName = settingsRepo.getDeviceName()
+            val meta = com.xgwnje.visionguard.data.model.AlertMeta(
+                deviceId = deviceId,
+                deviceName = deviceName,
+                timestamp = isoNow(),
+                detections = detections.map {
+                    com.xgwnje.visionguard.data.model.ServerDetection(
+                        label = it.label,
+                        confidence = it.confidence,
+                        bbox = com.xgwnje.visionguard.data.model.Bbox(it.bbox.left, it.bbox.top, it.bbox.width(), it.bbox.height())
+                    )
+                }
+            )
+            val gson = com.google.gson.Gson()
+            val msg = mapOf(
+                "type" to "alert",
+                "alertId" to alertId,
+                "deviceId" to deviceId,
+                "deviceName" to deviceName,
+                "timestamp" to meta.timestamp,
+                "detections" to gson.fromJson(gson.toJson(meta.detections), List::class.java),
+                "timings" to timings,
+                "wsSentAt" to isoNow()
+            )
+            val sent = wsClient.sendRawJson(gson.toJson(msg))
+            if (sent) {
+                Log.i(TAG, "报警已推送(WS): alertId=$alertId targets=${detections.size}")
+            } else {
+                Log.w(TAG, "报警推送失败(WS): alertId=$alertId")
+            }
+        }
+    }
+
+    /**
      * Bitmap → JPEG，与 Windows 端对齐：
      * - 宽度超过 960px 时等比缩放
      * - JPEG quality = 65（平衡带宽与画质）
@@ -202,10 +246,9 @@ class ServerPushService(
         }
     }
 
-    /** ISO 8601 格式当前时间 */
+    /** ISO 8601 格式当前时间（带本地时区偏移，与 Windows 端对齐） */
     private fun isoNow(): String {
-        val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US)
-        sdf.timeZone = TimeZone.getTimeZone("UTC")
+        val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSXXX", Locale.US)
         return sdf.format(Date())
     }
 }

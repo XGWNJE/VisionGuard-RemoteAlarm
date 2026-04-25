@@ -27,8 +27,15 @@ export interface AlertRecord {
   deviceName: string;
   timestamp: string;
   detections: Detection[];
-  screenshotPath: string;     // 磁盘路径
+  screenshotPath?: string;    // 磁盘路径（纯 WS 按需模型时为空）
   createdAt: number;          // Date.now()
+}
+
+/** GET /api/alerts 响应 */
+export interface AlertsQueryResponse {
+  ok: boolean;
+  alerts?: AlertRecord[];
+  error?: string;
 }
 
 // ── WebSocket 消息 ─────────────────────────────────────────

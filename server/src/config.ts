@@ -37,6 +37,12 @@ export const config = {
 
   /** 客户端最低版本要求 (语义化版本)。低于此版本的连接将在认证时被拒绝。 */
   minClientVersion: '3.2.1',
+
+  /** 是否接收检测端 HTTP POST 截图上传。false = 纯 WS 按需模型，截图仅存在检测端本地 */
+  enableHttpScreenshotUpload: process.env.ENABLE_HTTP_SCREENSHOT_UPLOAD === 'true',
+
+  /** 报警记录 TTL (小时)，默认 168 小时 = 7 天。与检测端本地截图缓存 TTL 对齐 */
+  alertTtlHours: parseInt(process.env.ALERT_TTL_HOURS || '168', 10),
 } as const;
 
 // 启动时检查 API_KEY 是否配置

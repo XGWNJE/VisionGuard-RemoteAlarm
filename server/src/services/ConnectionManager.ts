@@ -8,6 +8,7 @@
 import WebSocket from 'ws';
 import { config } from '../config';
 import { validateApiKey } from '../middleware/auth';
+import { addAlert } from '../services/AlertStore';
 import type {
   WsAuthMessage, WsHeartbeat, WsHeartbeatAndroid, WsCommand, WsSetConfig,
   WindowsClient, AndroidClient, WsAlertPush,
@@ -193,8 +194,18 @@ export function handleConnection(ws: WebSocket): void {
         break;
       case 'alert':
         if (role === 'windows' || role === 'android-detector') {
-          (msg as WsAlertPush).serverReceivedAt = new Date().toISOString();
-          broadcastAlert(msg as WsAlertPush);
+          const alert = msg as WsAlertPush;
+          alert.serverReceivedAt = new Date().toISOString();
+          // 存入报警记录（供接收端历史查询）
+          addAlert({
+            alertId: alert.alertId,
+            deviceId: alert.deviceId,
+            deviceName: alert.deviceName,
+            timestamp: alert.timestamp,
+            detections: alert.detections,
+            createdAt: Date.now(),
+          });
+          broadcastAlert(alert);
         }
         break;
       case 'command':

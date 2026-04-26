@@ -20,7 +20,7 @@ data class WsAuthMessage(
     val role: String = "android",
     val deviceId: String,
     val deviceName: String = "Android",
-    val version: String = "3.2.1"
+    val version: String = "3.5.3"
 )
 
 /** 服务器 → Android：认证结果 */

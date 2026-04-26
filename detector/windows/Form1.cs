@@ -6,6 +6,7 @@
 // │   Form1.UI.cs       — UI 构建：主布局、页面、辅助方法  │
 // └─────────────────────────────────────────────────────────┘
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
 using System.Threading.Tasks;
@@ -47,13 +48,17 @@ namespace VisionGuard
         private FlatRoundButton _btnStart, _btnStop;
 
         // ── 参数页 控件 ─────────────────────────────────────────────
-        private TextBox         _txtFps, _txtThreads, _txtCooldown;
         private DarkSlider      _trkThreshold;
         private Label           _lblThreshold;
+        private DarkSlider      _sliderSamplingRate;
+        private Label           _lblSamplingRate;
+        private DarkSlider      _sliderCooldown;
+        private Label           _lblCooldown;
         private ComboBox        _cmbModel;
 
         // ── 目标页 控件 ─────────────────────────────────────────────
-        private CocoClassPickerControl _classPicker;
+        private CheckBox[]      _targetCheckBoxes;
+        private readonly string[] _targetClassKeys = { "person", "bicycle", "car", "motorcycle", "bus", "truck" };
 
         // ── 服务器页 控件 ────────────────────────────────────────────
         private TextBox  _txtDeviceName;
@@ -166,13 +171,17 @@ namespace VisionGuard
 
         private MonitorConfig BuildConfig()
         {
+            var watched = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < _targetCheckBoxes.Length; i++)
+                if (_targetCheckBoxes[i].Checked)
+                    watched.Add(_targetClassKeys[i]);
+
             var cfg = new MonitorConfig
             {
                 ConfidenceThreshold  = _trkThreshold.Value / 100f,
-                TargetFps            = ParseInt(_txtFps.Text,      1,   5,  2),
-                IntraOpNumThreads    = ParseInt(_txtThreads.Text,  1,   8,  2),
-                AlertCooldownSeconds = ParseInt(_txtCooldown.Text, 1, 300,  5),
-                WatchedClasses       = _classPicker.SelectedClasses,
+                TargetFps            = _sliderSamplingRate.Value,
+                AlertCooldownSeconds = _sliderCooldown.Value,
+                WatchedClasses       = watched,
                 SaveAlertSnapshot    = true,
             };
 
@@ -205,9 +214,11 @@ namespace VisionGuard
             _btnStop.Enabled         =  started;
             _btnSelectRegion.Enabled = !started;
             _btnPickWindow.Enabled   = !started;
-            _txtFps.Enabled     = _txtThreads.Enabled = _txtCooldown.Enabled = !started;
+            _sliderSamplingRate.Enabled = !started;
+            _sliderCooldown.Enabled = !started;
             _trkThreshold.Enabled = !started;
-            _classPicker.Enabled  = !started;
+            foreach (var cb in _targetCheckBoxes)
+                cb.Enabled = !started;
 
             _tsStatus.Text      = started ? "● 监控中" : "○ 已停止";
             _tsStatus.ForeColor = started ? Color.LimeGreen : Color.Gray;

@@ -3,6 +3,7 @@ using System;
 using System.Drawing;
 using System.IO;
 using System.Windows.Forms;
+using VisionGuard.Data;
 using VisionGuard.Services;
 using VisionGuard.UI;
 using VisionGuard.Utils;
@@ -157,13 +158,12 @@ namespace VisionGuard
             int fh    = Font.Height;
             int PadX  = 12;
             int RowGap = fh / 3;
-            int RowH  = fh + 12;
+            int sliderH = fh + 8;
             int y     = 12;
 
             // 置信度阈值
             _pageParams.Controls.Add(MakeTitle("置信度阈值", PadX, ref y, fh));
 
-            int sliderH = fh + 8;
             _trkThreshold = new DarkSlider
             {
                 Left = PadX, Top = y, Height = sliderH,
@@ -176,7 +176,7 @@ namespace VisionGuard
 
             _lblThreshold = new Label
             {
-                Text = "0.45", Left = PadX, Top = y, Height = fh + 2,
+                Text = "45%", Left = PadX, Top = y, Height = fh + 2,
                 Width = _pageParams.ClientSize.Width - PadX * 2,
                 ForeColor = Color.LightGray, AutoSize = false,
                 Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top
@@ -184,22 +184,59 @@ namespace VisionGuard
             _pageParams.Controls.Add(_lblThreshold);
             y += fh + 2 + RowGap + fh / 2;
 
-            // 冷却时间
-            _pageParams.Controls.Add(MakeTitle("性能与报警", PadX, ref y, fh));
+            // 目标采样率
+            _pageParams.Controls.Add(MakeTitle("目标采样率", PadX, ref y, fh));
 
-            _txtCooldown = AddParamRow(_pageParams, "冷却(s)：", 1, 300, 5, PadX, RowH, ref y);
-            y += RowGap;
-            _txtFps     = AddParamRow(_pageParams, "FPS：",    1, 5, 2, PadX, RowH, ref y);
-            y += RowGap;
-            _txtThreads = AddParamRow(_pageParams, "线程数：", 1, 8, 2, PadX, RowH, ref y);
-            y += RowGap + fh / 2;
+            _sliderSamplingRate = new DarkSlider
+            {
+                Left = PadX, Top = y, Height = sliderH,
+                Width = _pageParams.ClientSize.Width - PadX * 2,
+                Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top,
+                Minimum = 1, Maximum = 5, Value = 3
+            };
+            _pageParams.Controls.Add(_sliderSamplingRate);
+            y += sliderH + RowGap;
+
+            _lblSamplingRate = new Label
+            {
+                Text = "3 次/秒", Left = PadX, Top = y, Height = fh + 2,
+                Width = _pageParams.ClientSize.Width - PadX * 2,
+                ForeColor = Color.LightGray, AutoSize = false,
+                Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top
+            };
+            _pageParams.Controls.Add(_lblSamplingRate);
+            y += fh + 2 + RowGap + fh / 2;
+
+            // 警报推送冷却时间
+            _pageParams.Controls.Add(MakeTitle("警报推送冷却时间", PadX, ref y, fh));
+
+            _sliderCooldown = new DarkSlider
+            {
+                Left = PadX, Top = y, Height = sliderH,
+                Width = _pageParams.ClientSize.Width - PadX * 2,
+                Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top,
+                Minimum = 1, Maximum = 300, Value = 5
+            };
+            _pageParams.Controls.Add(_sliderCooldown);
+            y += sliderH + RowGap;
+
+            _lblCooldown = new Label
+            {
+                Text = "5 秒", Left = PadX, Top = y, Height = fh + 2,
+                Width = _pageParams.ClientSize.Width - PadX * 2,
+                ForeColor = Color.LightGray, AutoSize = false,
+                Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top
+            };
+            _pageParams.Controls.Add(_lblCooldown);
+            y += fh + 2 + RowGap + fh / 2;
 
             // 模型选择
             _pageParams.Controls.Add(MakeTitle("模型选择", PadX, ref y, fh));
 
+            int rowH = fh + 12;
             _cmbModel = new ComboBox
             {
-                Left = PadX, Top = y, Height = RowH,
+                Left = PadX, Top = y, Height = rowH,
                 Width = _pageParams.ClientSize.Width - PadX * 2,
                 DropDownStyle = ComboBoxStyle.DropDownList,
                 BackColor = Color.FromArgb(45, 45, 45),
@@ -225,16 +262,31 @@ namespace VisionGuard
             int PadX = 12;
             int y    = 12;
 
-            _pageTargets.Controls.Add(MakeTitle("监控对象", PadX, ref y, Font.Height));
+            _pageTargets.Controls.Add(MakeTitle("监控目标", PadX, ref y, Font.Height));
 
-            _classPicker = new CocoClassPickerControl
+            // 6 个常用目标：2 行 × 3 列
+            _targetCheckBoxes = new CheckBox[_targetClassKeys.Length];
+            int colW = (_pageTargets.ClientSize.Width - PadX * 2) / 3;
+            int rowH = Font.Height + 20;
+            for (int i = 0; i < _targetClassKeys.Length; i++)
             {
-                Left = PadX, Top = y,
-                Width  = _pageTargets.ClientSize.Width - PadX * 2,
-                Height = _pageTargets.ClientSize.Height - y - 8,
-                Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top | AnchorStyles.Bottom
-            };
-            _pageTargets.Controls.Add(_classPicker);
+                int col = i % 3;
+                int row = i / 3;
+                var cb = new CheckBox
+                {
+                    Text      = CocoClassMap.EnZh[_targetClassKeys[i]],
+                    Left      = PadX + col * colW,
+                    Top       = y + row * rowH,
+                    Width     = colW - 4,
+                    Height    = rowH,
+                    ForeColor = Color.LightGray,
+                    BackColor = Color.FromArgb(32, 32, 32),
+                    Checked   = _targetClassKeys[i] == "person",
+                    Anchor    = AnchorStyles.Left | AnchorStyles.Top
+                };
+                _targetCheckBoxes[i] = cb;
+                _pageTargets.Controls.Add(cb);
+            }
         }
 
         // ════════════════════════════════════════════════════════════
@@ -361,10 +413,13 @@ namespace VisionGuard
 
             // 参数页事件
             _trkThreshold.ValueChanged += (s, e) =>
-                _lblThreshold.Text = (_trkThreshold.Value / 100f).ToString("F2");
+                _lblThreshold.Text = $"{_trkThreshold.Value}%";
 
-            // 目标页事件
-            _classPicker.SelectionChanged += (s, e) => { /* 可在此实时更新状态显示 */ };
+            _sliderSamplingRate.ValueChanged += (s, e) =>
+                _lblSamplingRate.Text = $"{_sliderSamplingRate.Value} 次/秒";
+
+            _sliderCooldown.ValueChanged += (s, e) =>
+                _lblCooldown.Text = $"{_sliderCooldown.Value} 秒";
         }
 
         // ════════════════════════════════════════════════════════════

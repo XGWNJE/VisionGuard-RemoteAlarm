@@ -203,9 +203,9 @@ namespace VisionGuard
             // 不停止心跳定时器：服务器依赖心跳判断在线状态，停止心跳会导致 Android 误报掉线
             // isMonitoring=false 通过下次 tick 自动传递，同时立即发一次最终状态
             _serverPushService.UpdateHeartbeatParams(isMonitoring: false, isAlarming: false, isReady: IsRegionReady,
-                cooldown: ParseInt(_txtCooldown.Text, 1, 300, 5),
+                cooldown: _sliderCooldown.Value,
                 confidence: _trkThreshold.Value / 100f,
-                targets: string.Join(",", _classPicker.SelectedClasses));
+                targets: GetWatchedClassesString());
             UpdateControlState(started: false);
             _log.Info(remote ? "[Server] 收到 pause，监控推理已停止。" : "监控已停止。");
             if (remote) _serverPushService.SendCommandAck("pause", true);

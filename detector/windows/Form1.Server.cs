@@ -23,13 +23,24 @@ namespace VisionGuard
             // 阈值 / 参数
             _trkThreshold.Value = Math.Max(_trkThreshold.Minimum,
                 Math.Min(_trkThreshold.Maximum, SettingsStore.GetInt("ConfidenceThresholdPct", 45)));
-            _txtFps.Text      = SettingsStore.GetInt("TargetFps",            2).ToString();
-            _txtThreads.Text  = SettingsStore.GetInt("IntraOpNumThreads",    2).ToString();
-            _txtCooldown.Text = SettingsStore.GetInt("AlertCooldownSeconds", 5).ToString();
+            _lblThreshold.Text = $"{_trkThreshold.Value}%";
 
-            // 监控对象（中英文选择器）
+            _sliderSamplingRate.Value = Math.Max(_sliderSamplingRate.Minimum,
+                Math.Min(_sliderSamplingRate.Maximum, SettingsStore.GetInt("TargetFps", 3)));
+            _lblSamplingRate.Text = $"{_sliderSamplingRate.Value} 次/秒";
+
+            _sliderCooldown.Value = Math.Max(_sliderCooldown.Minimum,
+                Math.Min(_sliderCooldown.Maximum, SettingsStore.GetInt("AlertCooldownSeconds", 5)));
+            _lblCooldown.Text = $"{_sliderCooldown.Value} 秒";
+
+            // 监控目标（6 类 CheckBox）
             HashSet<string> watched = SettingsStore.GetStringList("WatchedClasses");
-            _classPicker.SetSelection(watched);
+            for (int i = 0; i < _targetCheckBoxes.Length; i++)
+                _targetCheckBoxes[i].Checked = watched.Contains(_targetClassKeys[i]);
+            // 兼容旧数据：空集合时默认只选 "person"
+            if (watched.Count == 0)
+                for (int i = 0; i < _targetCheckBoxes.Length; i++)
+                    _targetCheckBoxes[i].Checked = _targetClassKeys[i] == "person";
 
             // 捕获模式
             string modeStr = SettingsStore.GetString("CaptureMode", CaptureMode.ScreenRegion.ToString());
@@ -111,21 +122,24 @@ namespace VisionGuard
                     isMonitoring: _monitorService.IsStarted,
                     isAlarming:   _alertService.IsAlarming,
                     isReady:       IsRegionReady,
-                    cooldown:      ParseInt(_txtCooldown.Text, 1, 300, 5),
+                    cooldown:      _sliderCooldown.Value,
                     confidence:    _trkThreshold.Value / 100f,
-                    targets:       string.Join(",", _classPicker.SelectedClasses));
+                    targets:       GetWatchedClassesString());
             _heartbeatTimer.Start();
         }
 
         private void SaveSettings()
         {
-            SettingsStore.Set("ConfidenceThresholdPct",  _trkThreshold.Value);
-            SettingsStore.Set("TargetFps",               ParseInt(_txtFps.Text,      1,  5, 2));
-            SettingsStore.Set("IntraOpNumThreads",        ParseInt(_txtThreads.Text,  1,  8, 2));
-            SettingsStore.Set("AlertCooldownSeconds",     ParseInt(_txtCooldown.Text, 1, 300, 5));
+            SettingsStore.Set("ConfidenceThresholdPct", _trkThreshold.Value);
+            SettingsStore.Set("TargetFps",              _sliderSamplingRate.Value);
+            SettingsStore.Set("AlertCooldownSeconds",   _sliderCooldown.Value);
 
-            SettingsStore.Set("WatchedClasses",
-                string.Join(",", _classPicker.SelectedClasses));
+            // 监控目标
+            var watched = new List<string>();
+            for (int i = 0; i < _targetCheckBoxes.Length; i++)
+                if (_targetCheckBoxes[i].Checked)
+                    watched.Add(_targetClassKeys[i]);
+            SettingsStore.Set("WatchedClasses", string.Join(",", watched));
 
             // 服务器设置：只保存设备名
             SettingsStore.Set("DeviceName", _txtDeviceName.Text.Trim());
@@ -150,6 +164,16 @@ namespace VisionGuard
         }
 
         // ── 服务器设置辅助 ────────────────────────────────────────────
+
+        /// <summary>收集当前已勾选的监控目标类名（逗号分隔）</summary>
+        private string GetWatchedClassesString()
+        {
+            var list = new System.Collections.Generic.List<string>();
+            for (int i = 0; i < _targetCheckBoxes.Length; i++)
+                if (_targetCheckBoxes[i].Checked)
+                    list.Add(_targetClassKeys[i]);
+            return string.Join(",", list);
+        }
 
         /// <summary>首次调用时自动生成 DeviceId 并持久化，用户不可见</summary>
         private string EnsureDeviceId()
@@ -234,9 +258,9 @@ namespace VisionGuard
                         isMonitoring: _monitorService.IsStarted,
                         isAlarming:   _alertService.IsAlarming,
                         isReady:      IsRegionReady,
-                        cooldown:     ParseInt(_txtCooldown.Text, 1, 300, 5),
+                        cooldown:     _sliderCooldown.Value,
                         confidence:   _trkThreshold.Value / 100f,
-                        targets:      string.Join(",", _classPicker.SelectedClasses));
+                        targets:      GetWatchedClassesString());
                     _serverPushService.SendHeartbeatNow();
                 }));
             };
@@ -250,9 +274,9 @@ namespace VisionGuard
                         isMonitoring: _monitorService.IsStarted,
                         isAlarming:   _alertService.IsAlarming,
                         isReady:      IsRegionReady,
-                        cooldown:     ParseInt(_txtCooldown.Text, 1, 300, 5),
+                        cooldown:     _sliderCooldown.Value,
                         confidence:   _trkThreshold.Value / 100f,
-                        targets:      string.Join(",", _classPicker.SelectedClasses));
+                        targets:      GetWatchedClassesString());
                     _serverPushService.SendHeartbeatNow();
                 }));
             };
@@ -270,7 +294,9 @@ namespace VisionGuard
                 case "cooldown":
                     if (int.TryParse(value, out int cd) && cd >= 1 && cd <= 300)
                     {
-                        _txtCooldown.Text = cd.ToString();
+                        _sliderCooldown.Value = Math.Max(_sliderCooldown.Minimum,
+                            Math.Min(_sliderCooldown.Maximum, cd));
+                        _lblCooldown.Text = $"{_sliderCooldown.Value} 秒";
                         // 如果正在监控，实时更新 MonitorService 的配置
                         if (_monitorService.IsStarted)
                             _monitorService.UpdateConfig(BuildConfig());
@@ -316,7 +342,8 @@ namespace VisionGuard
                             if (!string.IsNullOrEmpty(trimmed))
                                 classes.Add(trimmed);
                         }
-                    _classPicker.SetSelection(classes);
+                    for (int i = 0; i < _targetCheckBoxes.Length; i++)
+                        _targetCheckBoxes[i].Checked = classes.Contains(_targetClassKeys[i]);
                     if (_monitorService.IsStarted)
                         _monitorService.UpdateConfig(BuildConfig());
                     _serverPushService.SendCommandAck("set-config:targets", true);

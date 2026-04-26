@@ -63,7 +63,7 @@ namespace VisionGuard.Services
             if (_timer != null) return;
 
             _config  = config;
-            _engine  = new OnnxInferenceEngine(modelPath, config.IntraOpNumThreads);
+            _engine  = new OnnxInferenceEngine(modelPath, intraOpNumThreads: 2);
 
             int intervalMs = 1000 / Math.Max(1, config.TargetFps);
             _timer = new Timer(OnTick, null, 0, intervalMs);

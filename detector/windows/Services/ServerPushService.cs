@@ -176,8 +176,12 @@ namespace VisionGuard.Services
                 ["timings"] = alert.Timings,
                 ["wsSentAt"] = NtpSync.UtcNow.ToString("o"),
             };
-            if (!s.SendJson(msg))
-                LogManager.StaticWarn($"[Server] 报警发送失败 alertId={alert.AlertId}");
+            var labels = string.Join(",", alert.Detections.Select(d => d.Label));
+            var totalMs = alert.Timings.TryGetValue("totalProcessMs", out var t) ? $"{t}ms" : "N/A";
+            if (s.SendJson(msg))
+                LogManager.StaticInfo($"[Server] 报警已推送: alertId={alert.AlertId}, targets={alert.Detections.Count}, [{labels}], total={totalMs}");
+            else
+                LogManager.StaticWarn($"[Server] 报警推送失败 alertId={alert.AlertId}");
         }
 
         public void SendCommandAck(string command, bool success, string reason = "")
@@ -211,6 +215,7 @@ namespace VisionGuard.Services
             {
                 ["type"] = "heartbeat",
                 ["deviceId"] = _deviceId,
+                ["deviceName"] = _deviceName,
                 ["isMonitoring"] = isMonitoring,
                 ["isReady"] = isReady,
                 ["cooldown"] = cooldown,
@@ -607,6 +612,7 @@ namespace VisionGuard.Services
                     {
                         ["type"] = "heartbeat",
                         ["deviceId"] = _parent._deviceId,
+                        ["deviceName"] = _parent._deviceName,
                         ["isMonitoring"] = isMonitoring,
                         ["isReady"] = isReady,
                         ["cooldown"] = cooldown,
@@ -712,13 +718,13 @@ namespace VisionGuard.Services
                 list.Add(new Dictionary<string, object>
                 {
                     ["label"] = d.Label ?? "",
-                    ["confidence"] = Math.Round(d.Confidence, 4),
+                    ["confidence"] = d.Confidence,
                     ["bbox"] = new Dictionary<string, object>
                     {
-                        ["x"] = (int)d.BoundingBox.X,
-                        ["y"] = (int)d.BoundingBox.Y,
-                        ["w"] = (int)d.BoundingBox.Width,
-                        ["h"] = (int)d.BoundingBox.Height,
+                        ["x"] = d.BoundingBox.X,
+                        ["y"] = d.BoundingBox.Y,
+                        ["w"] = d.BoundingBox.Width,
+                        ["h"] = d.BoundingBox.Height,
                     },
                 });
             }

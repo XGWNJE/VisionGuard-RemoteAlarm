@@ -13,6 +13,7 @@ import android.util.Log
 import com.xgwnje.visionguard.AppConstants
 import com.xgwnje.visionguard.data.model.AlertEvent
 import com.xgwnje.visionguard.data.model.AlertMeta
+import com.xgwnje.visionguard.util.NtpSync
 import com.xgwnje.visionguard.data.model.Bbox
 import com.xgwnje.visionguard.data.model.ServerDetection
 import com.xgwnje.visionguard.data.model.WsCommandMessage
@@ -177,16 +178,23 @@ class ServerPushService(
      *
      * @param alertId 报警 ID
      * @param detections 检测结果
+     * @param timestampMs 报警发生时间戳（毫秒，与 Windows 端 alert.Timestamp 对齐）
      * @param timings 链路耗时统计
      */
-    fun pushAlert(alertId: String, detections: List<com.xgwnje.visionguard.data.model.Detection>, timings: Map<String, Long> = emptyMap()) {
+    fun pushAlert(
+        alertId: String,
+        detections: List<com.xgwnje.visionguard.data.model.Detection>,
+        timestampMs: Long,
+        timings: Map<String, Long> = emptyMap()
+    ) {
         scope.launch {
             val deviceId = settingsRepo.ensureDeviceId()
             val deviceName = settingsRepo.getDeviceName()
+            val timestamp = isoFormat(timestampMs)
             val meta = com.xgwnje.visionguard.data.model.AlertMeta(
                 deviceId = deviceId,
                 deviceName = deviceName,
-                timestamp = isoNow(),
+                timestamp = timestamp,
                 detections = detections.map {
                     com.xgwnje.visionguard.data.model.ServerDetection(
                         label = it.label,
@@ -201,10 +209,10 @@ class ServerPushService(
                 "alertId" to alertId,
                 "deviceId" to deviceId,
                 "deviceName" to deviceName,
-                "timestamp" to meta.timestamp,
+                "timestamp" to timestamp,
                 "detections" to gson.fromJson(gson.toJson(meta.detections), List::class.java),
                 "timings" to timings,
-                "wsSentAt" to isoNow()
+                "wsSentAt" to isoFormat(NtpSync.now())
             )
             val sent = wsClient.sendRawJson(gson.toJson(msg))
             if (sent) {
@@ -250,5 +258,11 @@ class ServerPushService(
     private fun isoNow(): String {
         val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSXXX", Locale.US)
         return sdf.format(Date())
+    }
+
+    /** 将毫秒时间戳转为 ISO 8601 字符串（与 Windows 端 alert.Timestamp 对齐） */
+    private fun isoFormat(timestampMs: Long): String {
+        val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSXXX", Locale.US)
+        return sdf.format(Date(timestampMs))
     }
 }

@@ -432,18 +432,24 @@ function handleHeartbeat(msg: WsHeartbeat): void {
     return;
   }
 
+  const nameChanged = msg.deviceName !== undefined && msg.deviceName !== client.deviceName;
   const changed =
     client.isMonitoring !== msg.isMonitoring ||
     client.isReady !== msg.isReady ||
     client.cooldown !== (msg.cooldown ?? client.cooldown) ||
     client.confidence !== (msg.confidence ?? client.confidence) ||
-    client.targets !== (msg.targets ?? client.targets);
+    client.targets !== (msg.targets ?? client.targets) ||
+    nameChanged;
 
   client.isMonitoring = msg.isMonitoring;
   client.isReady = msg.isReady ?? false;
   if (msg.cooldown !== undefined) client.cooldown = msg.cooldown;
   if (msg.confidence !== undefined) client.confidence = msg.confidence;
   if (msg.targets !== undefined) client.targets = msg.targets;
+  if (nameChanged) {
+    client.deviceName = msg.deviceName!;
+    console.log(`[ws][${new Date().toISOString()}] 设备名称更新: ${client.deviceName} (${msg.deviceId})`);
+  }
 
   const count = (_heartbeatCounter.get(msg.deviceId) ?? 0) + 1;
   _heartbeatCounter.set(msg.deviceId, count % 60 === 0 ? 0 : count);

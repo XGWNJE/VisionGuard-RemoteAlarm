@@ -177,6 +177,7 @@ class WebSocketClient {
         val s = session ?: return false
         val hb = WsHeartbeatMessage(
             deviceId = deviceId,
+            deviceName = deviceName,
             isMonitoring = isMonitoring,
             isReady = isReady,
             cooldown = heartbeatCooldown,
@@ -525,6 +526,7 @@ class WebSocketClient {
                     // 发送应用层心跳（使用 WsHeartbeatMessage 结构）
                     val hb = WsHeartbeatMessage(
                         deviceId = deviceId,
+                        deviceName = deviceName,
                         isMonitoring = isMonitoring,
                         isReady = isReady,
                         cooldown = heartbeatCooldown,

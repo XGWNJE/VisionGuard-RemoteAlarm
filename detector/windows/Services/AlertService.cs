@@ -83,9 +83,11 @@ namespace VisionGuard.Services
                 TrySaveSnapshot(snapshot, alertId);
 
             long alertMs = sw.ElapsedMilliseconds;
-            timings["alertMs"] = alertMs;
-            timings["totalProcessMs"] = timings["captureMs"] + timings["preprocessMs"]
-                                      + timings["inferMs"] + timings["parseMs"] + alertMs;
+            long processMs = timings["captureMs"] + timings["preprocessMs"]
+                           + timings["inferMs"] + timings["parseMs"] + alertMs;
+            // 简化表达：只保留本地计算处理总耗时
+            timings.Clear();
+            timings["processMs"] = processMs;
 
             // 触发事件（传递本帧所有检测结果）
             AlertTriggered?.Invoke(this, new AlertEvent(alertId, detections.AsReadOnly(), snapshot, timings));

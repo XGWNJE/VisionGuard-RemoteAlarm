@@ -594,7 +594,7 @@ class DetectorForegroundService : LifecycleService() {
     // ═════════════════════════════════════════════════════════
 
     private fun onAlertEvent(event: AlertEvent) {
-        val alertId = java.util.UUID.randomUUID().toString()
+        val alertId = event.alertId
         val timeStr = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault())
             .format(java.util.Date())
         _lastAlertPushTime.value = timeStr
@@ -605,8 +605,9 @@ class DetectorForegroundService : LifecycleService() {
             screenshotCache.save(alertId, bmp)
         }
 
-        // 2. 发送轻量 WS alert（无截图数据，模仿 Windows PushAlert）
-        serverPushService.pushAlert(alertId, event.detections)
+        // 2. 发送轻量 WS alert（无截图数据，与 Windows PushAlert 对齐）
+        // 使用 AlertEvent 中的报警时间和链路耗时，确保 timestamp/timings 与 Windows 端一致
+        serverPushService.pushAlert(alertId, event.detections, event.timestamp, event.timings)
 
         // 3. 报警通过 WS alert 推送，心跳不再携带 isAlarming 状态
     }

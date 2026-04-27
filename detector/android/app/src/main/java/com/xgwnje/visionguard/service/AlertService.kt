@@ -34,9 +34,15 @@ class AlertService(private val scope: CoroutineScope) {
      * @param detections 当前帧检测到的目标（已映射到原始帧坐标）
      * @param frameBitmap 原始帧 Bitmap 的独立副本（本方法负责回收）
      * @param config 监控配置
+     * @param timings 链路耗时统计（bitmap/preprocess/infer/parse 等）
      * @return 若触发报警返回 AlertEvent，否则返回 null
      */
-    fun evaluate(detections: List<Detection>, frameBitmap: Bitmap?, config: MonitorConfig): AlertEvent? {
+    fun evaluate(
+        detections: List<Detection>,
+        frameBitmap: Bitmap?,
+        config: MonitorConfig,
+        timings: Map<String, Long> = emptyMap()
+    ): AlertEvent? {
         synchronized(lock) {
             if (detections.isEmpty()) {
                 frameBitmap?.recycle()
@@ -47,6 +53,7 @@ class AlertService(private val scope: CoroutineScope) {
             val inCooldown = now - lastAlertTime <= config.cooldownMs
 
             // 无论是否在冷却期，都绘制帧供 UI 持续显示
+            val tAlertStart = System.currentTimeMillis()
             val renderedFrame = if (frameBitmap != null) {
                 try {
                     SnapshotRenderer.drawDetections(frameBitmap, detections)
@@ -57,11 +64,19 @@ class AlertService(private val scope: CoroutineScope) {
                     frameBitmap.recycle()
                 }
             } else null
+            val alertMs = System.currentTimeMillis() - tAlertStart
 
+            // 简化表达：只保留本地计算处理总耗时
+            val processMs = timings.values.sum() + alertMs
+            val finalTimings = mapOf("processMs" to processMs)
+
+            val alertId = java.util.UUID.randomUUID().toString()
             val event = AlertEvent(
+                alertId = alertId,
                 timestamp = NtpSync.now(),
                 detections = detections,
-                renderedFrame = renderedFrame
+                renderedFrame = renderedFrame,
+                timings = finalTimings
             )
 
             if (!inCooldown) {
@@ -70,9 +85,9 @@ class AlertService(private val scope: CoroutineScope) {
                 scope.launch {
                     _alertEvents.emit(event)
                 }
-                Log.i(TAG, "报警触发并推送: ${detections.size} 个目标, 标签=${detections.map { it.label }}")
+                Log.i(TAG, "报警触发并推送: alertId=$alertId, ${detections.size} 个目标, 标签=${detections.map { it.label }}")
             } else {
-                Log.i(TAG, "冷却期内，仅更新显示帧，不推送: ${detections.size} 个目标")
+                Log.i(TAG, "冷却期内，仅更新显示帧，不推送: alertId=$alertId, ${detections.size} 个目标")
             }
 
             return event

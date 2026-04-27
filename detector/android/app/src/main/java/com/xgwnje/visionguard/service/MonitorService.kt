@@ -276,9 +276,17 @@ class MonitorService(
             val filteredDetections = scaledDetections.filter { it.label in config.targets }
             InferenceDiagnostics.diagnoseDetections(scaledDetections, filteredDetections, config.confidence, config.targets)
 
-            // 7. 报警判定（冷却控制推送频率，不影响 UI 显示）
+            // 7. 构建链路耗时统计（与 Windows 端对齐）
+            val timings = mapOf(
+                "captureMs" to tBitmap,
+                "preprocessMs" to (tCropMask + tPreprocess),
+                "inferMs" to tInference,
+                "parseMs" to tParse
+            )
+
+            // 8. 报警判定（冷却控制推送频率，不影响 UI 显示）
             val bitmapCopy = bitmap.copy(Bitmap.Config.ARGB_8888, false)
-            val alertEvent = alertService.evaluate(filteredDetections, bitmapCopy, config)
+            val alertEvent = alertService.evaluate(filteredDetections, bitmapCopy, config, timings)
 
             // 手动抓拍优先：若用户请求了抓拍，复制当前帧并显示 3 秒
             if (snapshotRequested.getAndSet(false)) {

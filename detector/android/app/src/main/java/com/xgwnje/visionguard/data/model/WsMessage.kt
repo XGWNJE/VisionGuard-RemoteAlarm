@@ -68,6 +68,7 @@ data class WsScreenshotDataMessage(
 data class WsHeartbeatMessage(
     val type: String = "heartbeat",
     val deviceId: String,
+    val deviceName: String = "",
     val isMonitoring: Boolean = false,
     val isReady: Boolean = false,
     val cooldown: Int = 5,

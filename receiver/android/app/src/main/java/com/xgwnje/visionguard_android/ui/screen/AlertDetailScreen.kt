@@ -212,54 +212,23 @@ fun AlertDetailScreen(
                     Text("无检测结果", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
 
-                // 链路耗时
+                // 链路耗时（简化：本地处理 + 网络中继 + 合计）
                 val timings = alert.timings
-                if (!timings.isNullOrEmpty()) {
+                val processMs = timings?.get("processMs")
+                val relayMs = computeRelayMs(alert)
+                if (processMs != null || relayMs != null) {
                     Spacer(modifier = Modifier.height(16.dp))
                     HorizontalDivider()
                     Spacer(modifier = Modifier.height(12.dp))
                     Text("链路耗时", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    // Windows 各阶段
-                    val stageLabels = listOf(
-                        "captureMs" to "截图采集",
-                        "preprocessMs" to "预处理",
-                        "inferMs" to "模型推理",
-                        "parseMs" to "结果解析",
-                        "alertMs" to "报警处理",
-                    )
-                    stageLabels.forEach { (key, label) ->
-                        val ms = timings[key]
-                        if (ms != null) {
-                            TimingRow(label, "${ms}ms")
-                        }
-                    }
+                    processMs?.let { TimingRow("本地处理", "${it}ms") }
+                    relayMs?.let { TimingRow("网络中继", "${it}ms") }
 
-                    val totalMs = timings["totalProcessMs"]
-                    if (totalMs != null) {
+                    if (processMs != null && relayMs != null) {
                         Spacer(modifier = Modifier.height(4.dp))
-                        TimingRow("Windows 处理合计", "${totalMs}ms", bold = true)
-                    }
-
-                    // 传输链路（NTP 校准后的同地区时钟）
-                    val segmentMs = computeSegments(alert)
-                    if (segmentMs.isNotEmpty()) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        HorizontalDivider()
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text("传输链路", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
-                        Spacer(modifier = Modifier.height(8.dp))
-                        segmentMs.forEach { (label, ms) ->
-                            TimingRow(label, "${ms}ms")
-                        }
-                    }
-
-                    // 端到端总延迟（各环节求和，避免跨设备时钟偏差）
-                    if (segmentMs.isNotEmpty()) {
-                        val e2eEstimate = (totalMs ?: 0L) + segmentMs.sumOf { it.second }
-                        Spacer(modifier = Modifier.height(4.dp))
-                        TimingRow("端到端总延迟", "${e2eEstimate}ms", bold = true)
+                        TimingRow("合计", "${processMs + relayMs}ms", bold = true)
                     }
                 }
             }
@@ -267,21 +236,16 @@ fun AlertDetailScreen(
     }
 }
 
-private fun computeSegments(alert: AlertMessage): List<Pair<String, Long>> {
-    val segments = mutableListOf<Pair<String, Long>>()
+/**
+ * 计算网络中继耗时：检测端 WS 发出 → 接收端收到。
+ * 两端已 NTP 校准，直接做差即可。
+ */
+private fun computeRelayMs(alert: AlertMessage): Long? {
     val wsSent = try {
         alert.wsSentAt?.let { java.time.Instant.parse(it).toEpochMilli() }
     } catch (_: Exception) { null }
     val received = alert.receivedAt.takeIf { it > 0L }
-
-    // 检测端与查看端同地区、已 NTP 校准，直接做差即为网络延迟
-    if (wsSent != null && received != null) {
-        segments += "网络传输" to (received - wsSent)
-    }
-    if (received != null && alert.notifiedAt > 0L) {
-        segments += "通知发布" to (alert.notifiedAt - received)
-    }
-    return segments
+    return if (wsSent != null && received != null) received - wsSent else null
 }
 
 @Composable

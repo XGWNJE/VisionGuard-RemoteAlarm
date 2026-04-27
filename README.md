@@ -53,6 +53,15 @@ detector/windows/    detector/android/         server/                    receiv
 - **网络自适应** — 网络切换时自动重建连接，退避重连 + 幽灵检测
 - **端到端计时** — 完整追踪报警从检测到送达的各环节耗时
 
+## 部署环境
+
+| 端 | 最低系统要求 |
+|---|---|
+| Server | Ubuntu 20.04+ / Debian 11+，Node.js 20+ |
+| Windows 检测端 | **Windows 10 及以上**（.NET Framework 4.7.2，x64） |
+| Android 检测端 | Android 9.0+（API 28+），推荐骁龙 7/8 Gen 或天玑 8/9 系列 |
+| Android 接收端 | Android 9.0+（API 28+） |
+
 ## 快速开始
 
 ### Server

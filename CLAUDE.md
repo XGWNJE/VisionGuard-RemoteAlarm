@@ -158,6 +158,15 @@ detector/windows/    detector/android/         server/                    receiv
 - 自定义设备名：设置页可修改，DataStore 持久化
 - JPEG 压缩：quality 65，长边最大 960px（与 Windows 端对齐）
 
+## 部署环境
+
+| 端 | 最低系统要求 |
+|---|---|
+| Server | Ubuntu 20.04+ / Debian 11+，Node.js 20+ |
+| Windows 检测端 | **Windows 10 及以上**（.NET Framework 4.7.2，x64） |
+| Android 检测端 | Android 9.0+（API 28+），推荐骁龙 7/8 Gen 或天玑 8/9 系列 |
+| Android 接收端 | Android 9.0+（API 28+） |
+
 ## 环境配置
 
 ### Server `.env`

@@ -54,6 +54,7 @@ export interface WsAuthMessage {
 export interface WsHeartbeat {
   type: 'heartbeat';
   deviceId: string;
+  deviceName?: string;
   isMonitoring: boolean;
   isReady: boolean;
   cooldown?: number;

@@ -33,6 +33,9 @@ detector/android/.externalNativeBuild/
 detector/android/.cxx/
 detector/android/key/
 detector/android/app/*.jks
+receiver/android/app/*.jks
+receiver/android/key/
+receiver/android/keystore.properties
 VisionGuard_Android/keystore.properties
 VisionGuard_Android/app/*.jks
 VisionGuard_Android/.gradle/

@@ -1,6 +1,9 @@
 package com.xgwnje.visionguard.ui.screen
 
 import android.graphics.Bitmap
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -14,9 +17,17 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.Button
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
@@ -38,6 +49,7 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.dp
 import com.xgwnje.visionguard.data.model.MaskRegion
 import android.util.Log
@@ -54,6 +66,52 @@ import androidx.compose.foundation.verticalScroll
  * @param onConfirm 确认回调，返回遮罩列表和裁切倍率
  * @param onDismiss 取消回调
  */
+@Composable
+private fun CollapsibleHintDark(
+    hint: String,
+    modifier: Modifier = Modifier
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Column(modifier = modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 2.dp),
+            horizontalArrangement = Arrangement.Start,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(
+                onClick = { expanded = !expanded },
+                modifier = Modifier.size(20.dp)
+            ) {
+                Icon(
+                    imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = if (expanded) "收起提示" else "展开提示",
+                    tint = Color.LightGray.copy(alpha = 0.7f),
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+            Text(
+                text = if (expanded) "收起提示" else "查看提示",
+                style = MaterialTheme.typography.labelSmall,
+                color = Color.LightGray.copy(alpha = 0.7f)
+            )
+        }
+        AnimatedVisibility(
+            visible = expanded,
+            enter = expandVertically(),
+            exit = shrinkVertically()
+        ) {
+            Text(
+                text = hint,
+                style = MaterialTheme.typography.bodySmall,
+                color = Color.LightGray.copy(alpha = 0.8f),
+                modifier = Modifier.padding(start = 4.dp, top = 2.dp, bottom = 4.dp)
+            )
+        }
+    }
+}
+
 @Composable
 fun MaskEditorScreen(
     bitmap: Bitmap? = null,
@@ -75,12 +133,15 @@ fun MaskEditorScreen(
     var digitalZoom by remember { mutableFloatStateOf(initialZoom.coerceIn(1.0f, 5.0f)) }
 
     val scrollState = rememberScrollState()
+    val screenHeight = LocalConfiguration.current.screenHeightDp.dp
+    val maxCanvasHeight = (screenHeight * 0.45f).coerceAtMost(360.dp)
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
-            .padding(horizontal = 16.dp, vertical = 12.dp)
+            .statusBarsPadding()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
             .verticalScroll(scrollState)
     ) {
         // 标题
@@ -88,19 +149,19 @@ fun MaskEditorScreen(
             text = "设置监控区域",
             style = MaterialTheme.typography.titleLarge,
             color = Color.White,
-            modifier = Modifier.padding(bottom = 8.dp)
+            modifier = Modifier.padding(bottom = 4.dp)
         )
-        Text(
-            text = "拖拽画矩形遮挡不需要监控的区域，空白处表示全部识别",
-            style = MaterialTheme.typography.bodySmall,
-            color = Color.LightGray,
-            modifier = Modifier.padding(bottom = 8.dp)
+        CollapsibleHintDark(
+            hint = "拖拽画矩形遮挡不需要监控的区域，空白处表示全部识别"
         )
+
+        Spacer(modifier = Modifier.height(8.dp))
 
         // 画布区域：Bitmap + 遮罩层 + 裁切框层
         Box(
             modifier = Modifier
                 .fillMaxWidth()
+                .heightIn(max = maxCanvasHeight)
                 .aspectRatio(aspectRatio),
             contentAlignment = Alignment.Center
         ) {
@@ -267,26 +328,35 @@ fun MaskEditorScreen(
 
         // 数码裁切滑块
         Column(modifier = Modifier.fillMaxWidth()) {
-            Text(
-                text = "数码裁切: ${String.format("%.1f", digitalZoom)}x",
-                color = Color.White,
-                style = MaterialTheme.typography.bodyLarge
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "数码裁切",
+                    color = Color.White,
+                    style = MaterialTheme.typography.bodyLarge
+                )
+                Text(
+                    text = "${String.format("%.1f", digitalZoom)}x",
+                    color = Color.Gray,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
             Slider(
                 value = digitalZoom,
                 onValueChange = { digitalZoom = it.coerceIn(1.0f, 5.0f) },
                 valueRange = 1.0f..5.0f,
-                steps = 35, // 每 0.1 一个步进，但 Slider 的 steps 是分段数，(5-1)/0.1=40段，steps=39
+                steps = 35,
                 modifier = Modifier.fillMaxWidth()
             )
-            Text(
-                text = "1x = 全画幅识别    5x = 中心区域放大5倍",
-                color = Color.Gray,
-                style = MaterialTheme.typography.bodySmall
+            CollapsibleHintDark(
+                hint = "1x = 全画幅识别，5x = 中心区域放大5倍"
             )
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(8.dp))
 
         // 确认 / 取消
         Row(

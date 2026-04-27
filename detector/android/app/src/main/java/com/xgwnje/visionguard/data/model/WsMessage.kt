@@ -69,7 +69,6 @@ data class WsHeartbeatMessage(
     val type: String = "heartbeat",
     val deviceId: String,
     val isMonitoring: Boolean = false,
-    val isAlarming: Boolean = false,
     val isReady: Boolean = false,
     val cooldown: Int = 5,
     val confidence: Double = 0.45,

@@ -120,7 +120,6 @@ namespace VisionGuard
             _heartbeatTimer.Tick += (s, ev) =>
                 _serverPushService.UpdateHeartbeatParams(
                     isMonitoring: _monitorService.IsStarted,
-                    isAlarming:   _alertService.IsAlarming,
                     isReady:       IsRegionReady,
                     cooldown:      _sliderCooldown.Value,
                     confidence:    _trkThreshold.Value / 100f,
@@ -256,7 +255,6 @@ namespace VisionGuard
                     }
                     _serverPushService.UpdateHeartbeatParams(
                         isMonitoring: _monitorService.IsStarted,
-                        isAlarming:   _alertService.IsAlarming,
                         isReady:      IsRegionReady,
                         cooldown:     _sliderCooldown.Value,
                         confidence:   _trkThreshold.Value / 100f,
@@ -272,7 +270,6 @@ namespace VisionGuard
                     ApplyRemoteConfig(kv.Key, kv.Value);
                     _serverPushService.UpdateHeartbeatParams(
                         isMonitoring: _monitorService.IsStarted,
-                        isAlarming:   _alertService.IsAlarming,
                         isReady:      IsRegionReady,
                         cooldown:     _sliderCooldown.Value,
                         confidence:   _trkThreshold.Value / 100f,
@@ -352,7 +349,7 @@ namespace VisionGuard
                     break;
 
                 default:
-                    _serverPushService.SendCommandAck($"set-config:{key}", false, $"未知配置项: {key}");
+                    _serverPushService.SendCommandAck($"set-config:{key}", false, $"未知配置项：{key}");
                     break;
             }
         }

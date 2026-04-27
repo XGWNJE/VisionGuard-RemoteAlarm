@@ -126,7 +126,7 @@ class AlertForegroundService : LifecycleService() {
                 val stateText = when (state) {
                     WsState.CONNECTED    -> "已连接"
                     WsState.CONNECTING   -> "连接中..."
-                    WsState.AUTH_FAILED  -> "API Key 错误"
+                    WsState.AUTH_FAILED  -> "认证失败"
                     WsState.DISCONNECTED -> "未连接"
                 }
                 nm.notify(

@@ -329,7 +329,6 @@ function handleAuth(
       deviceName: msg.deviceName,
       clientType: msg.role,
       isMonitoring: false,
-      isAlarming: false,
       isReady: false,
       lastSeen: new Date(),
       cooldown: 5,
@@ -352,7 +351,6 @@ function handleAuth(
       deviceName: msg.deviceName,
       clientType: msg.role,
       isMonitoring: false,
-      isAlarming: false,
       isReady: false,
       lastSeen: new Date(),
       cooldown: 5,
@@ -436,14 +434,12 @@ function handleHeartbeat(msg: WsHeartbeat): void {
 
   const changed =
     client.isMonitoring !== msg.isMonitoring ||
-    client.isAlarming !== msg.isAlarming ||
     client.isReady !== msg.isReady ||
     client.cooldown !== (msg.cooldown ?? client.cooldown) ||
     client.confidence !== (msg.confidence ?? client.confidence) ||
     client.targets !== (msg.targets ?? client.targets);
 
   client.isMonitoring = msg.isMonitoring;
-  client.isAlarming = msg.isAlarming;
   client.isReady = msg.isReady ?? false;
   if (msg.cooldown !== undefined) client.cooldown = msg.cooldown;
   if (msg.confidence !== undefined) client.confidence = msg.confidence;
@@ -454,7 +450,7 @@ function handleHeartbeat(msg: WsHeartbeat): void {
   if (count === 1 || count % 60 === 0) {
     const silentSec = Math.round((Date.now() - client.lastSeen.getTime()) / 1000);
     const roleLabel = client.clientType === 'android-detector' ? 'Android检测端' : 'Windows';
-    console.log(`[ws][${new Date().toISOString()}] ${roleLabel} 心跳: ${client.deviceName} (${msg.deviceId}) monitoring=${msg.isMonitoring} alarming=${msg.isAlarming} 静默${silentSec}s`);
+    console.log(`[ws][${new Date().toISOString()}] ${roleLabel} 心跳: ${client.deviceName} (${msg.deviceId}) monitoring=${msg.isMonitoring} 静默${silentSec}s`);
   }
 
   client.lastSeen = new Date();
@@ -515,9 +511,9 @@ function handleCommand(senderWs: WebSocket, msg: WsCommand): void {
   };
 
   if (!target || target.ws.readyState !== WebSocket.OPEN) {
-    ack.reason = 'device offline';
+    ack.reason = '设备离线';
     sendJson(senderWs, ack, 'command-ack->sender');
-    console.warn(`[ws][${new Date().toISOString()}] 命令路由失败: target=${msg.targetDeviceId} command=${msg.command} reason=device-offline`);
+    console.warn(`[ws][${new Date().toISOString()}] 命令路由失败: target=${msg.targetDeviceId} command=${msg.command} reason=设备离线`);
     return;
   }
 
@@ -530,7 +526,7 @@ function handleCommand(senderWs: WebSocket, msg: WsCommand): void {
   // 检测端执行后会再发一个带 success/reason 的 command-ack，
   // 由 handleWindowsCommandAck 转发给 Android 接收端。
   ack.success = true;
-  ack.reason = 'relayed';
+  ack.reason = '已转发';
   sendJson(senderWs, ack, 'command-ack->sender');
 }
 
@@ -546,9 +542,9 @@ function handleSetConfig(senderWs: WebSocket, msg: WsSetConfig): void {
   };
 
   if (!target || target.ws.readyState !== WebSocket.OPEN) {
-    ack.reason = 'device offline';
+    ack.reason = '设备离线';
     sendJson(senderWs, ack, 'set-config-ack->sender');
-    console.warn(`[ws][${new Date().toISOString()}] 配置更新路由失败: target=${msg.targetDeviceId} key=${msg.key} value=${msg.value} reason=device-offline`);
+    console.warn(`[ws][${new Date().toISOString()}] 配置更新路由失败: target=${msg.targetDeviceId} key=${msg.key} value=${msg.value} reason=设备离线`);
     return;
   }
 
@@ -559,7 +555,7 @@ function handleSetConfig(senderWs: WebSocket, msg: WsSetConfig): void {
 
   // 同样只发"已转发"，检测端执行后回 command-ack
   ack.success = true;
-  ack.reason = 'relayed';
+  ack.reason = '已转发';
   sendJson(senderWs, ack, 'set-config-ack->sender');
 }
 
@@ -643,7 +639,6 @@ function buildDeviceList(): DeviceStatus[] {
       deviceName: c.deviceName,
       online: (now - c.lastSeen.getTime()) < config.deviceOfflineMs,
       isMonitoring: c.isMonitoring,
-      isAlarming: c.isAlarming,
       isReady: c.isReady,
       lastSeen: c.lastSeen.toISOString(),
       cooldown: c.cooldown,

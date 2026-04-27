@@ -3,18 +3,27 @@ package com.xgwnje.visionguard.ui.screen
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -25,6 +34,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
@@ -61,8 +71,8 @@ fun SettingsScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             // 设备名
             ConfigSectionTitle(title = "设备名称")
@@ -98,35 +108,32 @@ fun SettingsScreen(
 
             // 高分辨率模型（仅高端 SoC 可用）
             val isHighEnd = SocWhitelist.isHighEndSoc()
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 4.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 2.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Text(
                         text = "高分辨率模型",
                         style = MaterialTheme.typography.bodyMedium,
                         color = if (isHighEnd) MaterialTheme.colorScheme.onSurface
                         else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
                     )
-                    Text(
-                        text = if (isHighEnd) "640×640，精度更高，发热更大"
-                        else "当前设备不支持高分辨率",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (isHighEnd) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                        else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+                    Switch(
+                        checked = config.useHighResolution,
+                        onCheckedChange = { checked ->
+                            val newSize = if (checked && isHighEnd) 640 else 320
+                            onConfigChange(config.copy(useHighResolution = checked, inputSize = newSize))
+                        },
+                        enabled = isHighEnd
                     )
                 }
-                Switch(
-                    checked = config.useHighResolution,
-                    onCheckedChange = { checked ->
-                        val newSize = if (checked && isHighEnd) 640 else 320
-                        onConfigChange(config.copy(useHighResolution = checked, inputSize = newSize))
-                    },
-                    enabled = isHighEnd
+                CollapsibleHint(
+                    hint = if (isHighEnd) "640×640，精度更高，发热更大，耗电量增加"
+                    else "当前设备不支持高分辨率，仅骁龙 7/8 系列、天玑 8/9 系列等中高端 SoC 可用"
                 )
             }
 
@@ -236,11 +243,7 @@ fun SettingsScreen(
                     steps = 298,
                     modifier = Modifier.fillMaxWidth()
                 )
-                Text(
-                    text = "仅控制报警推送间隔，不影响识别与预览",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                )
+                CollapsibleHint(hint = "仅控制报警推送间隔，不影响识别与预览")
             }
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -279,8 +282,54 @@ private fun ConfigSectionTitle(title: String) {
         text = title,
         style = MaterialTheme.typography.titleSmall,
         color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(top = 4.dp)
+        modifier = Modifier.padding(top = 2.dp, bottom = 2.dp)
     )
+}
+
+@Composable
+private fun CollapsibleHint(
+    hint: String,
+    modifier: Modifier = Modifier
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Column(modifier = modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 2.dp),
+            horizontalArrangement = Arrangement.Start,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(
+                onClick = { expanded = !expanded },
+                modifier = Modifier.size(20.dp)
+            ) {
+                Icon(
+                    imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = if (expanded) "收起提示" else "展开提示",
+                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+            Text(
+                text = if (expanded) "收起提示" else "查看提示",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+            )
+        }
+        AnimatedVisibility(
+            visible = expanded,
+            enter = expandVertically(),
+            exit = shrinkVertically()
+        ) {
+            Text(
+                text = hint,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                modifier = Modifier.padding(start = 4.dp, top = 2.dp, bottom = 4.dp)
+            )
+        }
+    }
 }
 
 @Composable

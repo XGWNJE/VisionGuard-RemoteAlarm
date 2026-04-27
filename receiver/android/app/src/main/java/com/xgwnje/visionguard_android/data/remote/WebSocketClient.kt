@@ -493,7 +493,8 @@ class WebSocketClient {
                     val cmd = obj.get("command")?.asString ?: ""
                     val success = obj.get("success")?.asBoolean ?: false
                     val reason = obj.get("reason")?.asString ?: ""
-                    if (reason != "relayed") {
+                    // 过滤服务端"已转发"的临时 ack，只显示检测端实际执行结果
+                    if (reason != "relayed" && reason != "已转发") {
                         val display = if (!success && reason.isNotEmpty()) "$cmd（$reason）" else cmd
                         scope.launch { _onCommandAck.emit(Pair(display, success)) }
                     }

@@ -237,8 +237,8 @@ class ServerPushService(
     }
 
     /** 发送命令回执 */
-    fun sendCommandAck(command: String, success: Boolean) {
-        val sent = wsClient.sendCommandAck(command, success)
+    fun sendCommandAck(command: String, success: Boolean, reason: String = "") {
+        val sent = wsClient.sendCommandAck(command, success, reason)
         if (sent) {
             Log.i(TAG, "命令回执已发送: $command success=$success")
         } else {

@@ -55,7 +55,6 @@ export interface WsHeartbeat {
   type: 'heartbeat';
   deviceId: string;
   isMonitoring: boolean;
-  isAlarming: boolean;
   isReady: boolean;
   cooldown?: number;
   confidence?: number;
@@ -88,7 +87,6 @@ export interface DeviceStatus {
   deviceName: string;
   online: boolean;
   isMonitoring: boolean;
-  isAlarming: boolean;
   isReady: boolean;
   lastSeen: string;
   cooldown: number;
@@ -187,7 +185,6 @@ export interface WindowsClient {
   deviceName: string;
   clientType: string;
   isMonitoring: boolean;
-  isAlarming: boolean;
   isReady: boolean;
   lastSeen: Date;
   cooldown: number;

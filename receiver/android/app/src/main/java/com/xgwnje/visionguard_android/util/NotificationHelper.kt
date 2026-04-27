@@ -16,7 +16,9 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
 import androidx.core.app.NotificationCompat
+import androidx.core.graphics.drawable.IconCompat
 import com.xgwnje.visionguard_android.MainActivity
 import com.xgwnje.visionguard_android.R
 import com.xgwnje.visionguard_android.data.model.AlertMessage
@@ -85,8 +87,8 @@ object NotificationHelper {
         )
 
         val builder = NotificationCompat.Builder(context, ALERT_CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_dialog_alert)
-            .setContentTitle("⚠ ${alert.deviceName}：$topLabel")
+        setSmallAppIcon(builder, context)
+        builder.setContentTitle("⚠ ${alert.deviceName}：$topLabel")
             .setContentText("${alert.detections.size} 个目标  ${formatTime(alert.timestamp)}")
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
@@ -111,14 +113,14 @@ object NotificationHelper {
     }
 
     fun buildAlertSummaryNotification(context: Context): Notification {
-        return NotificationCompat.Builder(context, ALERT_CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_dialog_alert)
-            .setContentTitle("VisionGuard")
+        val builder = NotificationCompat.Builder(context, ALERT_CHANNEL_ID)
+        setSmallAppIcon(builder, context)
+        builder.setContentTitle("VisionGuard")
             .setContentText("有新警报")
             .setGroup("vg_alerts")
             .setGroupSummary(true)
             .setAutoCancel(true)
-            .build()
+        return builder.build()
     }
 
     fun buildForegroundNotification(context: Context, stateText: String): Notification {
@@ -127,14 +129,49 @@ object NotificationHelper {
             context, 0, openIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        return NotificationCompat.Builder(context, FOREGROUND_CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_menu_view)
-            .setContentTitle("VisionGuard 守护中")
+        val builder = NotificationCompat.Builder(context, FOREGROUND_CHANNEL_ID)
+        setSmallAppIcon(builder, context)
+        builder.setContentTitle("VG 接收")
             .setContentText(stateText)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
             .setContentIntent(pi)
-            .build()
+        return builder.build()
+    }
+
+    /** 将 smallIcon 设为完整应用图标（24dp 标准通知尺寸） */
+    private fun setSmallAppIcon(builder: NotificationCompat.Builder, context: Context) {
+        val bitmap = getAppIconBitmap(context, sizeDp = 24)
+        if (bitmap != null) {
+            builder.setSmallIcon(IconCompat.createWithBitmap(bitmap))
+        } else {
+            builder.setSmallIcon(R.mipmap.ic_launcher_foreground)
+        }
+    }
+
+    /**
+     * 获取应用图标 Bitmap（自适应图标也会合成完整图像）。
+     * @param sizeDp 目标尺寸（dp），通知 smallIcon 标准 24dp，largeIcon 默认原图。
+     */
+    private fun getAppIconBitmap(context: Context, sizeDp: Int = 0): Bitmap? {
+        return try {
+            val drawable = context.packageManager.getApplicationIcon(context.packageName)
+            val density = context.resources.displayMetrics.density
+            val w: Int
+            val h: Int
+            if (sizeDp > 0) {
+                w = (sizeDp * density).toInt().coerceAtLeast(1)
+                h = w
+            } else {
+                w = drawable.intrinsicWidth.coerceAtLeast(1)
+                h = drawable.intrinsicHeight.coerceAtLeast(1)
+            }
+            val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(bitmap)
+            drawable.setBounds(0, 0, canvas.width, canvas.height)
+            drawable.draw(canvas)
+            bitmap
+        } catch (_: Exception) { null }
     }
 
     /** 将 ISO 8601 时间戳解析为 HH:mm:ss 显示 */

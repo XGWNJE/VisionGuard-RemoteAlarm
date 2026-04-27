@@ -14,7 +14,6 @@ data class DeviceInfo(
     val deviceName: String,
     val online: Boolean,
     val isMonitoring: Boolean,
-    val isAlarming: Boolean,
     val isReady: Boolean,
     val lastSeen: String,
     val cooldown: Int = 5,

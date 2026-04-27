@@ -96,9 +96,6 @@ class WebSocketClient {
     var isMonitoring: Boolean = false
 
     @Volatile
-    var isAlarming: Boolean = false
-
-    @Volatile
     var isReady: Boolean = false
 
     @Volatile
@@ -181,7 +178,6 @@ class WebSocketClient {
         val hb = WsHeartbeatMessage(
             deviceId = deviceId,
             isMonitoring = isMonitoring,
-            isAlarming = isAlarming,
             isReady = isReady,
             cooldown = heartbeatCooldown,
             confidence = heartbeatConfidence,
@@ -530,7 +526,6 @@ class WebSocketClient {
                     val hb = WsHeartbeatMessage(
                         deviceId = deviceId,
                         isMonitoring = isMonitoring,
-                        isAlarming = isAlarming,
                         isReady = isReady,
                         cooldown = heartbeatCooldown,
                         confidence = heartbeatConfidence,

@@ -88,7 +88,6 @@ class DetectorForegroundService : LifecycleService() {
     // ── 核心组件 ──────────────────────────────────────────────
     private lateinit var settingsRepo: SettingsRepository
     private lateinit var serverPushService: ServerPushService
-    private lateinit var networkMonitor: NetworkMonitor
     private lateinit var screenshotCache: ScreenshotCache
 
     private lateinit var inferenceEngine: OnnxInferenceEngine
@@ -133,7 +132,6 @@ class DetectorForegroundService : LifecycleService() {
         // 2. 初始化数据层
         settingsRepo = SettingsRepository(this)
         serverPushService = ServerPushService(this, settingsRepo, serviceScope)
-        networkMonitor = NetworkMonitor(this)
         screenshotCache = ScreenshotCache(this)
 
         // 3. 初始化推理引擎
@@ -218,14 +216,11 @@ class DetectorForegroundService : LifecycleService() {
             Log.w(TAG, "释放 wakeLock 异常", e)
         }
 
-        // 断开 WS
+        // 断开 WS（内部同时注销网络监听）
         serverPushService.disconnect()
 
         // 关闭 ONNX session
         inferenceEngine.close()
-
-        // 注销网络监听
-        networkMonitor.unregister()
 
         // 关闭 CameraX executor
         cameraExecutor.shutdown()
@@ -410,6 +405,7 @@ class DetectorForegroundService : LifecycleService() {
 
                 monitorService.updateConfig(config)
                 updateWsHeartbeatStatus()
+                serverPushService.wsClient.sendHeartbeatNow()
 
                 Log.i(TAG, "配置已热更新")
             } catch (e: Exception) {
@@ -445,6 +441,8 @@ class DetectorForegroundService : LifecycleService() {
         }
 
         _isReady.value = success
+        updateWsHeartbeatStatus()
+        serverPushService.wsClient.sendHeartbeatNow()
 
         // 从 DataStore 完整恢复配置，并同步到 currentConfigFlow
         val confidence = settingsRepo.getConfidence()
@@ -513,6 +511,7 @@ class DetectorForegroundService : LifecycleService() {
             val success = inferenceEngine.loadModel(modelFileName, inputSize)
             _isReady.value = success
             updateWsHeartbeatStatus()
+            serverPushService.wsClient.sendHeartbeatNow()
             success
         }
     }
@@ -609,12 +608,7 @@ class DetectorForegroundService : LifecycleService() {
         // 2. 发送轻量 WS alert（无截图数据，模仿 Windows PushAlert）
         serverPushService.pushAlert(alertId, event.detections)
 
-        // 3. 更新心跳状态
-        serverPushService.wsClient.isAlarming = true
-        serviceScope.launch {
-            delay(currentConfig.cooldownMs)
-            serverPushService.wsClient.isAlarming = false
-        }
+        // 3. 报警通过 WS alert 推送，心跳不再携带 isAlarming 状态
     }
 
     /** 响应接收端的截图请求：从本地缓存读取并 base64 推送 */
@@ -650,7 +644,7 @@ class DetectorForegroundService : LifecycleService() {
             "pause" -> {
                 // 与本地停止监控对齐：解绑 CameraX、停止 MonitorService
                 stopMonitoring()
-                serverPushService.sendCommandAck("pause", true)
+                serverPushService.sendCommandAck("pause", true, "监控已停止")
                 // 立即推送心跳，让接收端快速同步状态
                 serverPushService.wsClient.sendHeartbeatNow()
             }
@@ -659,13 +653,13 @@ class DetectorForegroundService : LifecycleService() {
                 if (!isMonitoring.value) {
                     startMonitoring(currentConfig)
                 }
-                serverPushService.sendCommandAck("resume", true)
+                serverPushService.sendCommandAck("resume", true, "监控已启动")
                 // 立即推送心跳，让接收端快速同步状态
                 serverPushService.wsClient.sendHeartbeatNow()
             }
             else -> {
                 Log.w(TAG, "未知命令: ${command.command}")
-                serverPushService.sendCommandAck(command.command, false)
+                serverPushService.sendCommandAck(command.command, false, "未知命令")
             }
         }
     }
@@ -730,7 +724,7 @@ class DetectorForegroundService : LifecycleService() {
 
     private fun updateForegroundNotification(state: WsState) {
         val stateText = when (state) {
-            WsState.CONNECTED -> if (_isMonitoring.value) "监控中 | 已连接" else "就绪 | 已连接"
+            WsState.CONNECTED -> "已连接"
             WsState.CONNECTING -> "连接中..."
             WsState.AUTH_FAILED -> "认证失败"
             WsState.DISCONNECTED -> "未连接"

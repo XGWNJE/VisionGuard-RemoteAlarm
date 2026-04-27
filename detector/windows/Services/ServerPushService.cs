@@ -61,7 +61,7 @@ namespace VisionGuard.Services
 
         // ── 心跳参数（UI 写，Session 读） ────────────────────────────
         private readonly object _hbParamsLock = new object();
-        private bool _hbIsMonitoring, _hbIsAlarming, _hbIsReady;
+        private bool _hbIsMonitoring, _hbIsReady;
         private int _hbCooldown = 5;
         private float _hbConfidence = 0.45f;
         private string _hbTargets = "";
@@ -147,13 +147,12 @@ namespace VisionGuard.Services
 
         public void Disconnect() => Post(OnDisconnect);
 
-        public void UpdateHeartbeatParams(bool isMonitoring, bool isAlarming, bool isReady,
+        public void UpdateHeartbeatParams(bool isMonitoring, bool isReady,
             int cooldown, float confidence, string targets)
         {
             lock (_hbParamsLock)
             {
                 _hbIsMonitoring = isMonitoring;
-                _hbIsAlarming = isAlarming;
                 _hbIsReady = isReady;
                 _hbCooldown = cooldown;
                 _hbConfidence = confidence;
@@ -196,14 +195,13 @@ namespace VisionGuard.Services
         {
             var s = _session;
             if (s == null || _state != WsState.Connected) return;
-            bool isMonitoring, isAlarming, isReady;
+            bool isMonitoring, isReady;
             int cooldown;
             float confidence;
             string targets;
             lock (_hbParamsLock)
             {
                 isMonitoring = _hbIsMonitoring;
-                isAlarming = _hbIsAlarming;
                 isReady = _hbIsReady;
                 cooldown = _hbCooldown;
                 confidence = _hbConfidence;
@@ -214,7 +212,6 @@ namespace VisionGuard.Services
                 ["type"] = "heartbeat",
                 ["deviceId"] = _deviceId,
                 ["isMonitoring"] = isMonitoring,
-                ["isAlarming"] = isAlarming,
                 ["isReady"] = isReady,
                 ["cooldown"] = cooldown,
                 ["confidence"] = confidence,
@@ -593,14 +590,13 @@ namespace VisionGuard.Services
                         return;
                     }
 
-                    bool isMonitoring, isAlarming, isReady;
+                    bool isMonitoring, isReady;
                     int cooldown;
                     float confidence;
                     string targets;
                     lock (_parent._hbParamsLock)
                     {
                         isMonitoring = _parent._hbIsMonitoring;
-                        isAlarming = _parent._hbIsAlarming;
                         isReady = _parent._hbIsReady;
                         cooldown = _parent._hbCooldown;
                         confidence = _parent._hbConfidence;
@@ -612,7 +608,6 @@ namespace VisionGuard.Services
                         ["type"] = "heartbeat",
                         ["deviceId"] = _parent._deviceId,
                         ["isMonitoring"] = isMonitoring,
-                        ["isAlarming"] = isAlarming,
                         ["isReady"] = isReady,
                         ["cooldown"] = cooldown,
                         ["confidence"] = confidence,

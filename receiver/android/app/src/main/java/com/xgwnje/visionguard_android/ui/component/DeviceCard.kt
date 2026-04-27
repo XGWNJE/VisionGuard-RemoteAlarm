@@ -81,7 +81,6 @@ fun DeviceCard(
                 )
                 val statusText = when {
                     !device.online      -> "⬜ 离线"
-                    device.isAlarming   -> "🔴 报警中"
                     device.isMonitoring -> "🟢 监控中"
                     !device.isReady     -> "⚪ 选区未设定"
                     else                -> "🟡 已就绪"
@@ -102,7 +101,7 @@ fun DeviceCard(
             ) {
                 val enabled = device.online
 
-                // 开始/停止监控：纯远控按钮，只响应 isMonitoring，不响应 isAlarming
+                // 开始/停止监控：纯远控按钮，响应 isMonitoring 状态
                 if (device.isMonitoring) {
                     OutlinedButton(
                         onClick = { onCommand("pause") },

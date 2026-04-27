@@ -62,3 +62,4 @@ Desktop.ini
 
 # ===== release 文件夹（构建产物）=====
 **/release/ 
+detector/android/.key/det

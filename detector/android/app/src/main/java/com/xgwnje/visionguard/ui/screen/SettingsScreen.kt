@@ -23,7 +23,8 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
@@ -131,15 +132,17 @@ fun SettingsScreen(
 
             // 置信度滑块
             ConfigSectionTitle(title = "置信度阈值")
+            var localConfidence by remember(config.confidence) { mutableFloatStateOf(config.confidence) }
             Column(modifier = Modifier.fillMaxWidth()) {
                 Text(
-                    text = "${(config.confidence * 100).toInt()}%",
+                    text = "${(localConfidence * 100).toInt()}%",
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Slider(
-                    value = config.confidence,
-                    onValueChange = { onConfigChange(config.copy(confidence = it)) },
+                    value = localConfidence,
+                    onValueChange = { localConfidence = it },
+                    onValueChangeFinished = { onConfigChange(config.copy(confidence = localConfidence)) },
                     valueRange = 0.1f..0.95f,
                     steps = 16,
                     modifier = Modifier.fillMaxWidth()
@@ -148,15 +151,17 @@ fun SettingsScreen(
 
             // 目标采样率
             ConfigSectionTitle(title = "目标采样率")
+            var localSamplingRate by remember(config.targetSamplingRate) { mutableIntStateOf(config.targetSamplingRate) }
             Column(modifier = Modifier.fillMaxWidth()) {
                 Text(
-                    text = "${config.targetSamplingRate} 次/秒",
+                    text = "${localSamplingRate} 次/秒",
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Slider(
-                    value = config.targetSamplingRate.toFloat(),
-                    onValueChange = { onConfigChange(config.copy(targetSamplingRate = it.toInt())) },
+                    value = localSamplingRate.toFloat(),
+                    onValueChange = { localSamplingRate = it.toInt() },
+                    onValueChangeFinished = { onConfigChange(config.copy(targetSamplingRate = localSamplingRate)) },
                     valueRange = 1f..5f,
                     steps = 3,
                     modifier = Modifier.fillMaxWidth()
@@ -216,15 +221,17 @@ fun SettingsScreen(
 
             // 警报推送冷却时间
             ConfigSectionTitle(title = "警报推送冷却时间")
+            var localCooldown by remember(config.cooldownMs) { mutableIntStateOf((config.cooldownMs / 1000).toInt()) }
             Column(modifier = Modifier.fillMaxWidth()) {
                 Text(
-                    text = "${(config.cooldownMs / 1000).toInt()} 秒",
+                    text = "${localCooldown} 秒",
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Slider(
-                    value = (config.cooldownMs / 1000).toFloat(),
-                    onValueChange = { onConfigChange(config.copy(cooldownMs = it.toInt() * 1000L)) },
+                    value = localCooldown.toFloat(),
+                    onValueChange = { localCooldown = it.toInt() },
+                    onValueChangeFinished = { onConfigChange(config.copy(cooldownMs = localCooldown * 1000L)) },
                     valueRange = 1f..300f,
                     steps = 298,
                     modifier = Modifier.fillMaxWidth()

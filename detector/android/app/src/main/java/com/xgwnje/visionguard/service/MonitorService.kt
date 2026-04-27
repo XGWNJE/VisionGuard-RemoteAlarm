@@ -204,14 +204,31 @@ class MonitorService(
 
             // 1. ImageProxy → Bitmap
             val t1 = System.currentTimeMillis()
-            bitmap = preprocessor.toBitmap(imageProxy)
-            if (bitmap == null) {
+            val rawBitmap = preprocessor.toBitmap(imageProxy)
+            if (rawBitmap == null) {
                 Log.e(TAG, "[FRAME-$frameCounter] toBitmap() 返回 null，跳过")
                 return@processFrame
             }
             val tBitmap = System.currentTimeMillis() - t1
-            Log.i(TAG, "[FRAME-$frameCounter] Bitmap: ${bitmap.width}x${bitmap.height} config=${bitmap.config}, 耗时=${tBitmap}ms")
-            InferenceDiagnostics.diagnoseBitmap(bitmap, "raw")
+            Log.i(TAG, "[FRAME-$frameCounter] Bitmap: ${rawBitmap.width}x${rawBitmap.height} config=${rawBitmap.config}, 耗时=${tBitmap}ms")
+            InferenceDiagnostics.diagnoseBitmap(rawBitmap, "raw")
+
+            // 1.5 中心裁切 + 遮罩涂黑（基于实际 Bitmap 尺寸）
+            val tCrop = System.currentTimeMillis()
+            val (croppedBitmap, cropOffset) = preprocessor.cropAndMask(
+                rawBitmap,
+                config.digitalZoom,
+                config.maskRegions
+            )
+            // offsetX/Y 为原始帧 → 裁切后帧的偏移量；
+            // 当前报警绘制直接在 croppedBitmap 上进行，检测框也基于此坐标系，故暂不需要加回偏移。
+            val (offsetX, offsetY) = cropOffset
+            bitmap = croppedBitmap  // 后续报警截图使用裁切后的 Bitmap
+            if (croppedBitmap !== rawBitmap) {
+                rawBitmap.recycle()  // 裁切后释放原始 Bitmap
+            }
+            val tCropMask = System.currentTimeMillis() - tCrop
+            Log.i(TAG, "[FRAME-$frameCounter] 裁切+遮罩: zoom=${config.digitalZoom}, offset=($offsetX,$offsetY), bitmap=${bitmap.width}x${bitmap.height}, 耗时=${tCropMask}ms")
 
             // 保存第 1、5、10 帧用于离线验证
             if (frameCounter <= 10 && (frameCounter == 1 || frameCounter % 5 == 0)) {

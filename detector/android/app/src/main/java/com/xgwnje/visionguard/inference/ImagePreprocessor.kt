@@ -2,12 +2,15 @@ package com.xgwnje.visionguard.inference
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
 import android.graphics.ImageFormat
 import android.graphics.Matrix
+import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.YuvImage
 import android.util.Log
 import androidx.camera.core.ImageProxy
+import com.xgwnje.visionguard.data.model.MaskRegion
 import java.io.ByteArrayOutputStream
 
 /**
@@ -140,6 +143,73 @@ class ImagePreprocessor(val inputSize: Int) {
             Log.e(TAG, "Error converting ImageProxy to Bitmap", e)
             null
         }
+    }
+
+    /**
+     * 对 Bitmap 做中心裁切 + 遮罩涂黑。
+     *
+     * @param bitmap 原始帧（实际采集到的尺寸）
+     * @param digitalZoom 裁切倍率，1.0 = 不裁切
+     * @param maskRegions 遮罩区域列表（相对坐标 0~1，基于原始帧尺寸）
+     * @return Pair<处理后的 Bitmap, Pair<裁切偏移X, 裁切偏移Y>>
+     *         若未做任何处理，返回原 Bitmap 和 (0, 0)
+     */
+    fun cropAndMask(
+        bitmap: Bitmap,
+        digitalZoom: Float,
+        maskRegions: List<MaskRegion>
+    ): Pair<Bitmap, Pair<Int, Int>> {
+        val zoom = digitalZoom.coerceAtLeast(1.0f)
+        val needCrop = zoom > 1.0f
+        val needMask = maskRegions.isNotEmpty()
+
+        if (!needCrop && !needMask) {
+            return Pair(bitmap, Pair(0, 0))
+        }
+
+        // 1. 中心裁切
+        val srcWidth = bitmap.width
+        val srcHeight = bitmap.height
+        val cropWidth = if (needCrop) (srcWidth / zoom).toInt() else srcWidth
+        val cropHeight = if (needCrop) (srcHeight / zoom).toInt() else srcHeight
+        val cropLeft = if (needCrop) (srcWidth - cropWidth) / 2 else 0
+        val cropTop = if (needCrop) (srcHeight - cropHeight) / 2 else 0
+
+        val workingBitmap = if (needCrop) {
+            Bitmap.createBitmap(bitmap, cropLeft, cropTop, cropWidth, cropHeight)
+        } else {
+            bitmap
+        }
+
+        // 2. 遮罩涂黑（遮罩坐标基于原始帧尺寸，需映射到裁切后的坐标系）
+        if (needMask) {
+            val canvas = Canvas(workingBitmap)
+            val paint = Paint().apply { color = android.graphics.Color.BLACK }
+
+            for (region in maskRegions) {
+                // 遮罩在原始帧上的像素坐标
+                val maskLeft = region.left * srcWidth
+                val maskTop = region.top * srcHeight
+                val maskRight = region.right * srcWidth
+                val maskBottom = region.bottom * srcHeight
+
+                // 映射到裁切后的坐标系
+                val rectLeft = (maskLeft - cropLeft).coerceIn(0f, workingBitmap.width.toFloat())
+                val rectTop = (maskTop - cropTop).coerceIn(0f, workingBitmap.height.toFloat())
+                val rectRight = (maskRight - cropLeft).coerceIn(0f, workingBitmap.width.toFloat())
+                val rectBottom = (maskBottom - cropTop).coerceIn(0f, workingBitmap.height.toFloat())
+
+                if (rectRight > rectLeft && rectBottom > rectTop) {
+                    canvas.drawRect(rectLeft, rectTop, rectRight, rectBottom, paint)
+                }
+            }
+        }
+
+        Log.i(TAG, "cropAndMask: src=${srcWidth}x${srcHeight}, zoom=$zoom, " +
+                "crop=(${cropLeft},${cropTop},${cropWidth}x${cropHeight}), " +
+                "masks=${maskRegions.size}")
+
+        return Pair(workingBitmap, Pair(cropLeft, cropTop))
     }
 
     /**

@@ -16,6 +16,10 @@ import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
+import com.xgwnje.visionguard.data.model.MaskRegion
+import com.xgwnje.visionguard.data.model.MonitorConfig
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -33,6 +37,8 @@ class SettingsRepository(private val context: Context) {
         val SELECTED_MODEL      = stringPreferencesKey("selected_model")      // yolo26n / yolo26s
         val TARGET_SAMPLING_RATE = intPreferencesKey("target_sampling_rate")  // 次/秒，默认 3
         val USE_HIGH_RESOLUTION = booleanPreferencesKey("use_high_resolution") // 640x640，默认 false
+        val MASK_REGIONS        = stringPreferencesKey("mask_regions")         // JSON 数组，默认空
+        val DIGITAL_ZOOM        = floatPreferencesKey("digital_zoom")          // 默认 1.0f
         val DEVICE_NAME         = stringPreferencesKey("device_name")          // 自定义设备名
     }
 
@@ -43,7 +49,11 @@ class SettingsRepository(private val context: Context) {
         const val DEFAULT_MODEL = "yolo26n"
         const val DEFAULT_TARGET_SAMPLING_RATE = 3
         const val DEFAULT_USE_HIGH_RESOLUTION = false
+        const val DEFAULT_DIGITAL_ZOOM = 1.0f
         const val DEFAULT_DEVICE_NAME = "Android-Detector"
+
+        private val gson = Gson()
+        private val maskRegionType = object : TypeToken<List<MaskRegion>>() {}.type
     }
 
     /** 读取设备 ID（首次启动时自动生成并持久化） */
@@ -93,6 +103,21 @@ class SettingsRepository(private val context: Context) {
         prefs[Keys.USE_HIGH_RESOLUTION] ?: DEFAULT_USE_HIGH_RESOLUTION
     }
 
+    /** 读取遮罩区域列表（JSON 反序列化） */
+    val maskRegionsFlow: Flow<List<MaskRegion>> = context.dataStore.data.map { prefs ->
+        val json = prefs[Keys.MASK_REGIONS] ?: "[]"
+        try {
+            gson.fromJson<List<MaskRegion>>(json, maskRegionType) ?: emptyList()
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    /** 读取数码裁切倍率 */
+    val digitalZoomFlow: Flow<Float> = context.dataStore.data.map { prefs ->
+        prefs[Keys.DIGITAL_ZOOM] ?: DEFAULT_DIGITAL_ZOOM
+    }
+
     /** 读取自定义设备名 */
     val deviceNameFlow: Flow<String> = context.dataStore.data.map { prefs ->
         prefs[Keys.DEVICE_NAME] ?: DEFAULT_DEVICE_NAME
@@ -122,6 +147,29 @@ class SettingsRepository(private val context: Context) {
         context.dataStore.edit { prefs -> prefs[Keys.USE_HIGH_RESOLUTION] = v }
     }
 
+    suspend fun setMaskRegions(v: List<MaskRegion>) {
+        val json = gson.toJson(v)
+        context.dataStore.edit { prefs -> prefs[Keys.MASK_REGIONS] = json }
+    }
+
+    suspend fun setDigitalZoom(v: Float) {
+        context.dataStore.edit { prefs -> prefs[Keys.DIGITAL_ZOOM] = v }
+    }
+
+    /** 批量保存 MonitorConfig（原子写入，减少文件 IO 次数） */
+    suspend fun saveMonitorConfig(config: MonitorConfig) {
+        context.dataStore.edit { prefs ->
+            prefs[Keys.CONFIDENCE] = config.confidence
+            prefs[Keys.COOLDOWN] = (config.cooldownMs / 1000).toInt()
+            prefs[Keys.TARGETS] = config.targets.joinToString(",")
+            prefs[Keys.SELECTED_MODEL] = config.modelName
+            prefs[Keys.TARGET_SAMPLING_RATE] = config.targetSamplingRate
+            prefs[Keys.USE_HIGH_RESOLUTION] = config.useHighResolution
+            prefs[Keys.MASK_REGIONS] = gson.toJson(config.maskRegions)
+            prefs[Keys.DIGITAL_ZOOM] = config.digitalZoom
+        }
+    }
+
     /** 同步读取当前值（供立即使用） */
     suspend fun getCooldown(): Int = cooldownFlow.first()
     suspend fun getConfidence(): Float = confidenceFlow.first()
@@ -129,6 +177,8 @@ class SettingsRepository(private val context: Context) {
     suspend fun getSelectedModel(): String = selectedModelFlow.first()
     suspend fun getTargetSamplingRate(): Int = targetSamplingRateFlow.first()
     suspend fun getUseHighResolution(): Boolean = useHighResolutionFlow.first()
+    suspend fun getMaskRegions(): List<MaskRegion> = maskRegionsFlow.first()
+    suspend fun getDigitalZoom(): Float = digitalZoomFlow.first()
 
     suspend fun setDeviceName(v: String) {
         context.dataStore.edit { prefs -> prefs[Keys.DEVICE_NAME] = v }

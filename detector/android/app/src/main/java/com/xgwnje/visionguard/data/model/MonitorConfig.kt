@@ -7,5 +7,7 @@ data class MonitorConfig(
     val targetSamplingRate: Int = 3,
     val inputSize: Int = 320,
     val modelName: String = "yolo26n",
-    val useHighResolution: Boolean = false
+    val useHighResolution: Boolean = false,
+    val maskRegions: List<MaskRegion> = emptyList(),
+    val digitalZoom: Float = 1.0f
 )

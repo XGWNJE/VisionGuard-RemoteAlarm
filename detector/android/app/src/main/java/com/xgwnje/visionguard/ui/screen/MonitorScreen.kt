@@ -33,7 +33,7 @@ fun MonitorScreen(
     lastAlertPushTime: String?,
     actualSamplingRate: Float,
     onToggleMonitoring: () -> Unit,
-    onRequestSnapshot: () -> Unit,
+    onOpenMaskEditor: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -88,16 +88,16 @@ fun MonitorScreen(
                 )
             }
 
-            // 手动预览按钮：无目标时辅助确认摄像头视角
+            // 设置监控区域按钮：仅在未监控时可用
             OutlinedButton(
-                onClick = onRequestSnapshot,
+                onClick = onOpenMaskEditor,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(48.dp),
-                enabled = isMonitoring
+                enabled = !isMonitoring
             ) {
                 Text(
-                    text = "手动预览",
+                    text = "设置监控区域",
                     style = MaterialTheme.typography.bodyLarge
                 )
             }

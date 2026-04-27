@@ -81,6 +81,10 @@ class DetectorForegroundService : LifecycleService() {
     private val _currentConfigFlow = MutableStateFlow(MonitorConfig())
     val currentConfigFlow: StateFlow<MonitorConfig> = _currentConfigFlow.asStateFlow()
 
+    /** 当前 CameraX 帧的宽高比（宽/高），用于遮罩编辑器画布尺寸 */
+    private val _frameAspectRatio = MutableStateFlow(0.75f)
+    val frameAspectRatio: StateFlow<Float> = _frameAspectRatio.asStateFlow()
+
     // ── 核心组件 ──────────────────────────────────────────────
     private lateinit var settingsRepo: SettingsRepository
     private lateinit var serverPushService: ServerPushService
@@ -284,6 +288,82 @@ class DetectorForegroundService : LifecycleService() {
         monitorService.requestSnapshot()
     }
 
+    /**
+     * 临时绑定 CameraX 捕获单帧预览（用于遮罩编辑器背景）。
+     * 若已在监控中则直接请求快照；否则临时绑定 ImageAnalysis 获取一帧后解绑。
+     */
+    fun capturePreviewFrame() {
+        serviceScope.launch {
+            try {
+                // 已在监控中 → 直接请求快照，下一帧会进入 _lastAlertFrame
+                if (_isMonitoring.value) {
+                    monitorService.requestSnapshot()
+                    return@launch
+                }
+
+                // 未监控 → 临时绑定 CameraX 获取一帧
+                val cameraProviderFuture = ProcessCameraProvider.getInstance(this@DetectorForegroundService)
+                cameraProviderFuture.addListener({
+                    try {
+                        val provider = cameraProviderFuture.get()
+
+                        val targetSize = android.util.Size(640, 480)
+                        val resolutionSelector = ResolutionSelector.Builder()
+                            .setResolutionStrategy(
+                                ResolutionStrategy(
+                                    targetSize,
+                                    ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER
+                                )
+                            )
+                            .build()
+
+                        val tempImageAnalysis = ImageAnalysis.Builder()
+                            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                            .setResolutionSelector(resolutionSelector)
+                            .build()
+
+                        var frameCaptured = false
+
+                        tempImageAnalysis.setAnalyzer(cameraExecutor) { imageProxy ->
+                            if (!frameCaptured) {
+                                frameCaptured = true
+                                val bitmap = preprocessor.toBitmap(imageProxy)
+                                imageProxy.close()
+
+                                bitmap?.let {
+                                    _lastAlertFrame.value = it
+                                    // 同步更新宽高比
+                                    _frameAspectRatio.value = it.width.toFloat() / it.height.toFloat()
+                                    Log.i(TAG, "预览帧已捕获: ${it.width}x${it.height}")
+                                }
+
+                                // unbindAll 必须在主线程执行
+                                ContextCompat.getMainExecutor(this@DetectorForegroundService).execute {
+                                    provider.unbindAll()
+                                }
+                            } else {
+                                imageProxy.close()
+                            }
+                        }
+
+                        provider.unbindAll()
+                        provider.bindToLifecycle(
+                            this@DetectorForegroundService,
+                            CameraSelector.DEFAULT_BACK_CAMERA,
+                            tempImageAnalysis
+                        )
+
+                        Log.i(TAG, "临时预览 CameraX 已绑定，等待帧...")
+                    } catch (e: Exception) {
+                        Log.e(TAG, "预览帧捕获失败", e)
+                    }
+                }, ContextCompat.getMainExecutor(this@DetectorForegroundService))
+            } catch (e: Exception) {
+                Log.e(TAG, "获取预览帧异常", e)
+            }
+        }
+    }
+
     /** 停止监控 */
     fun stopMonitoring() {
         try {
@@ -305,6 +385,7 @@ class DetectorForegroundService : LifecycleService() {
             try {
                 val modelChanged = config.modelName != currentConfig.modelName ||
                         config.inputSize != currentConfig.inputSize
+                val zoomChanged = config.digitalZoom != currentConfig.digitalZoom
 
                 if (modelChanged) {
                     val success = loadModel(config.modelName, config.inputSize)
@@ -319,6 +400,14 @@ class DetectorForegroundService : LifecycleService() {
 
                 currentConfig = config
                 _currentConfigFlow.value = config
+
+                // 裁切倍率变化且正在监控 → 重新绑定 CameraX 以应用新分辨率
+                if (zoomChanged && _isMonitoring.value) {
+                    Log.i(TAG, "裁切倍率变化 ${currentConfig.digitalZoom} → ${config.digitalZoom}，重新绑定 CameraX")
+                    unbindCameraX()
+                    bindCameraX()
+                }
+
                 monitorService.updateConfig(config)
                 updateWsHeartbeatStatus()
 
@@ -357,12 +446,26 @@ class DetectorForegroundService : LifecycleService() {
 
         _isReady.value = success
 
-        // 同步 currentConfig，确保后续 startMonitoring 不会误判模型已匹配
-        currentConfig = currentConfig.copy(
-            modelName = selectedModel,
+        // 从 DataStore 完整恢复配置，并同步到 currentConfigFlow
+        val confidence = settingsRepo.getConfidence()
+        val cooldown = settingsRepo.getCooldown()
+        val targetsStr = settingsRepo.getTargets()
+        val samplingRate = settingsRepo.getTargetSamplingRate()
+        val maskRegions = settingsRepo.getMaskRegions()
+        val digitalZoom = settingsRepo.getDigitalZoom()
+        currentConfig = MonitorConfig(
+            confidence = confidence,
+            cooldownMs = cooldown * 1000L,
+            targets = targetsStr.split(",").map { it.trim() }.filter { it.isNotEmpty() }.toSet(),
+            targetSamplingRate = samplingRate,
             inputSize = inputSize,
-            useHighResolution = useHighRes
+            modelName = selectedModel,
+            useHighResolution = useHighRes,
+            maskRegions = maskRegions,
+            digitalZoom = digitalZoom
         )
+        _currentConfigFlow.value = currentConfig
+        Log.i(TAG, "配置已完整恢复: confidence=$confidence, cooldown=${cooldown}s, zoom=$digitalZoom, masks=${maskRegions.size}")
 
         monitorService = MonitorService(
             context = this,
@@ -426,16 +529,24 @@ class DetectorForegroundService : LifecycleService() {
                     cameraProvider = cameraProviderFuture.get()
                     val provider = cameraProvider ?: return@addListener
 
-                    // 仅绑定 ImageAnalysis，无 Preview
-                    // 使用 ResolutionSelector 限制最大分辨率，避免某些设备回退到超大分辨率
+                    // 动态分辨率：根据裁切倍率提升采集分辨率，避免数码裁切后画面过糊
+                    val targetSize = when {
+                        currentConfig.digitalZoom >= 3f -> android.util.Size(1920, 1080)
+                        currentConfig.digitalZoom >= 2f -> android.util.Size(1280, 960)
+                        else -> android.util.Size(640, 480)
+                    }
                     val resolutionSelector = ResolutionSelector.Builder()
                         .setResolutionStrategy(
                             ResolutionStrategy(
-                                android.util.Size(640, 480),
+                                targetSize,
                                 ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER
                             )
                         )
                         .build()
+                    // 竖屏手机 rotationDegrees=90，Bitmap 旋转后宽高交换
+                    val rotatedAspectRatio = targetSize.height.toFloat() / targetSize.width.toFloat()
+                    _frameAspectRatio.value = rotatedAspectRatio
+                    Log.i(TAG, "CameraX 请求分辨率: ${targetSize.width}x${targetSize.height} (zoom=${currentConfig.digitalZoom}), 旋转后宽高比=$rotatedAspectRatio")
 
                     imageAnalysis = ImageAnalysis.Builder()
                         .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)

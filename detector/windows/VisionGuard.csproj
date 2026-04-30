@@ -10,7 +10,7 @@
     <OutputType>WinExe</OutputType>
     <RootNamespace>VisionGuard</RootNamespace>
     <AssemblyName>VisionGuard</AssemblyName>
-    <ApplicationIcon>favicon.ico</ApplicationIcon>
+    <ApplicationIcon>favico3n.ico</ApplicationIcon>
     <TargetFrameworkVersion>v4.7.2</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
@@ -363,6 +363,7 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <Link>Assets\%(RecursiveDir)%(Filename)%(Extension)</Link>
     </Content>
+    <Content Include="favico3n.ico" />
     <Content Include="favicon.ico" />
     <Content Include="VisionGuard.ico" />
   </ItemGroup>

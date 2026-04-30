@@ -1,6 +1,6 @@
 # VisionGuard
 
-![Version](https://img.shields.io/badge/version-v3.5.2-blue)
+![Version](https://img.shields.io/badge/version-v3.6.0-blue)
 
 基于 AI 的实时监控系统。支持 Windows PC 和 Android 手机作为检测端，通过自建服务器将报警实时推送至 Android 接收端。
 

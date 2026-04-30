@@ -7,7 +7,8 @@ set -euo pipefail
 #   --full: 同时同步 package.json 并 npm install
 
 VPS_HOST="root@216.36.111.208"
-VPS_PORT="53111"
+# SSH 端口建议通过环境变量或 ~/.ssh/config 配置，避免硬编码
+VPS_PORT="${VPS_PORT:-22}"
 VPS_PATH="/opt/visionguard/VisionGuard_Server"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 

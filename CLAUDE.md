@@ -91,7 +91,7 @@ detector/windows/    detector/android/         server/                    receiv
 | ← Server | `command-ack` | Server | 命令执行结果（含 relayed/实际结果两次） |
 | ← Server | `kicked` | Server | 重复连接被踢 |
 
-**部署**：VPS `216.36.111.208:3000`（SSH 端口 `53111`），systemd 服务 `visionguard`
+**部署**：VPS `216.36.111.208:3000`，systemd 服务 `visionguard`
 **部署脚本**：[server/deploy.sh](server/deploy.sh)
 
 ### receiver/android — Android 接收端

@@ -67,7 +67,7 @@ namespace VisionGuard
         private FlatRoundButton _btnRetry; // 手动重试按钮
 
         // ── 服务器硬编码常量 ──────────────────────────────────────────
-        private const string ServerUrl = "http://66.154.112.91:3000";
+        private const string ServerUrl = "http://216.36.111.208:3000";
         private const string ServerApiKey = "XG-VisionGuard-2024";
 
         // ── ServerPushService + 心跳定时器 ───────────────────────────

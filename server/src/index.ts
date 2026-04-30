@@ -6,6 +6,10 @@
 // │ 对外 API：无 (入口文件)                                  │
 // └─────────────────────────────────────────────────────────┘
 
+// 先加载 .env，确保后续 config 读取时环境变量已就绪
+import './env';
+
+import fs from 'fs';
 import http from 'http';
 import express from 'express';
 import { WebSocketServer } from 'ws';
@@ -16,29 +20,6 @@ import screenshotRouter from './routes/screenshot';
 import { handleConnection, initPing } from './services/ConnectionManager';
 import { startCleanupTimer } from './services/ScreenshotCleanup';
 import { cleanupExpiredAlerts } from './services/AlertStore';
-
-// ── 加载 .env (简易实现，无需 dotenv 依赖) ─────────────────
-import fs from 'fs';
-import path from 'path';
-
-function loadEnv(): void {
-  const envPath = path.resolve(__dirname, '..', '.env');
-  if (!fs.existsSync(envPath)) return;
-  const lines = fs.readFileSync(envPath, 'utf-8').split('\n');
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
-    const eqIdx = trimmed.indexOf('=');
-    if (eqIdx < 1) continue;
-    const key = trimmed.slice(0, eqIdx).trim();
-    const val = trimmed.slice(eqIdx + 1).trim();
-    if (!process.env[key]) {
-      process.env[key] = val;
-    }
-  }
-}
-
-loadEnv();
 
 // ── Express app ────────────────────────────────────────────
 

@@ -8,7 +8,7 @@ package com.xgwnje.visionguard_android
 
 object AppConstants {
     /** 服务器地址（不含末尾斜杠） */
-    const val SERVER_URL = "http://66.154.112.91:3000"
+    const val SERVER_URL = "http://216.36.111.208:3000"
 
     /** API 密钥（与服务器 .env 中 API_KEY 一致） */
     const val API_KEY = "XG-VisionGuard-2024"

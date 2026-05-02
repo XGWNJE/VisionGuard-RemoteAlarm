@@ -42,6 +42,7 @@ namespace VisionGuard.UI
             BackColor           = Color.FromArgb(28, 28, 28);
             ForeColor           = Color.LightGray;
             FormBorderStyle     = FormBorderStyle.Sizable;
+            ShowIcon            = false;
 
             BuildUI();
             Shown += (s, e) => LoadWindowsAsync();

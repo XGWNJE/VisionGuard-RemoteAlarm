@@ -88,6 +88,69 @@ namespace VisionGuard
             }
         }
 
+        // ── 编辑遮罩区域 ─────────────────────────────────────────────
+
+        private void BtnEditMasks_Click(object sender, EventArgs e)
+        {
+            // 1. 校验已选定捕获目标
+            if (!IsRegionReady)
+            {
+                MessageBox.Show(
+                    "请先选择监控区域或目标窗口。",
+                    "未选择捕获目标", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            // 2. 抓一帧底图（与 MonitorService 实际监控帧的尺寸/裁切一致）
+            Bitmap snapshot;
+            try
+            {
+                if (_targetWindow != null)
+                {
+                    snapshot = WindowCapturer.CaptureWindow(_targetWindow.Handle, _windowSubRegion);
+                }
+                else
+                {
+                    snapshot = ScreenCapturer.CaptureRegion(_screenRegion);
+                }
+            }
+            catch (Exception ex)
+            {
+                _log.Error("抓取底图失败：" + ex.Message);
+                MessageBox.Show(
+                    "无法抓取底图：" + ex.Message,
+                    "捕获失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            if (snapshot == null || snapshot.Width <= 0 || snapshot.Height <= 0)
+            {
+                _log.Warn("抓取底图返回空，无法打开遮罩编辑器。");
+                snapshot?.Dispose();
+                return;
+            }
+
+            // 3. 打开编辑器
+            using (snapshot)
+            using (var editor = new MaskEditorForm(snapshot, _maskRegions))
+            {
+                if (editor.ShowDialog(this) == DialogResult.OK)
+                {
+                    _maskRegions = new System.Collections.Generic.List<RectangleF>(editor.Masks);
+                    SaveSettings();
+                    UpdateMaskInfoLabel();
+
+                    // 监控运行中：热更新 MonitorService 配置（下个 Tick 即生效）
+                    if (_monitorService.IsStarted)
+                        _monitorService.UpdateConfig(BuildConfig());
+
+                    _log.Info(_maskRegions.Count == 0
+                        ? "已清空遮罩区域。"
+                        : $"已更新遮罩区域：{_maskRegions.Count} 个。");
+                }
+            }
+        }
+
         // ── 开始监控 ─────────────────────────────────────────────────
 
         private void BtnStart_Click(object sender, EventArgs e) => StartMonitor(remote: false);

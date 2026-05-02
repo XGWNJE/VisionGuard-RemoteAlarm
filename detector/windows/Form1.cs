@@ -46,6 +46,8 @@ namespace VisionGuard
         private FlatRoundButton _btnSelectRegion;
         private FlatRoundButton _btnPickWindow;
         private FlatRoundButton _btnStart, _btnStop;
+        private FlatRoundButton _btnEditMasks;
+        private Label           _lblMaskInfo;
 
         // ── 参数页 控件 ─────────────────────────────────────────────
         private DarkSlider      _trkThreshold;
@@ -90,6 +92,10 @@ namespace VisionGuard
 
         private string ModelPath => Path.Combine(
             AppDomain.CurrentDomain.BaseDirectory, "Assets", $"{_selectedModel}.onnx");
+
+        // ── 遮罩区域 ────────────────────────────────────────────────
+        // 相对坐标 [0,1]，对齐 Android 端 MaskRegion；本地配置不通过 set-config 远程同步
+        private List<RectangleF> _maskRegions = new List<RectangleF>();
 
         // ════════════════════════════════════════════════════════════
         // 构造
@@ -201,6 +207,9 @@ namespace VisionGuard
                 cfg.CaptureRegion = _screenRegion;
             }
 
+            // 注入当前遮罩列表（防御性拷贝，避免 UI 后续编辑影响 MonitorService 中的 _config）
+            cfg.MaskRegions = new List<RectangleF>(_maskRegions);
+
             return cfg;
         }
 
@@ -214,6 +223,7 @@ namespace VisionGuard
             _btnStop.Enabled         =  started;
             _btnSelectRegion.Enabled = !started;
             _btnPickWindow.Enabled   = !started;
+            if (_btnEditMasks != null) _btnEditMasks.Enabled = !started;
             _sliderSamplingRate.Enabled = !started;
             _sliderCooldown.Enabled = !started;
             _trkThreshold.Enabled = !started;
@@ -239,6 +249,14 @@ namespace VisionGuard
                     ? "未选择区域"
                     : $"X:{_screenRegion.X}  Y:{_screenRegion.Y}  {_screenRegion.Width}×{_screenRegion.Height}";
             }
+        }
+
+        /// <summary>刷新「当前遮罩：N 个」标签。</summary>
+        private void UpdateMaskInfoLabel()
+        {
+            if (_lblMaskInfo == null) return;
+            int n = _maskRegions != null ? _maskRegions.Count : 0;
+            _lblMaskInfo.Text = n == 0 ? "当前遮罩：—" : $"当前遮罩：{n} 个";
         }
 
         // ════════════════════════════════════════════════════════════

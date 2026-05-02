@@ -41,5 +41,16 @@ namespace VisionGuard.Utils
                 return v.ToString();
             return fallback;
         }
+
+        /// <summary>
+        /// 反序列化 JSON 到指定类型，失败返回 default(T)。
+        /// 用于解析持久化的复合对象列表（如 MaskRegions）。
+        /// </summary>
+        public static T Deserialize<T>(string json)
+        {
+            if (string.IsNullOrWhiteSpace(json)) return default(T);
+            try { return _js.Deserialize<T>(json); }
+            catch { return default(T); }
+        }
     }
 }

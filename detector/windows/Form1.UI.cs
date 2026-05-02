@@ -134,6 +134,22 @@ namespace VisionGuard
             _btnPickWindow   = MakePageBtn(_pageCapture, "选择窗口…", Color.FromArgb(45, 60, 80),  Color.FromArgb(58, 78, 105),  PadX, BtnH, ref y);
             y += RowGap;
             _btnSelectRegion = MakePageBtn(_pageCapture, "拖拽选区…", Color.FromArgb(45, 80, 45),  Color.FromArgb(58, 100, 58), PadX, BtnH, ref y);
+            y += RowGap;
+
+            // 遮罩区域按钮（与拖拽选区同视觉层级，紫色调与 Android 端保持区分）
+            _btnEditMasks = MakePageBtn(_pageCapture, "遮罩区域…", Color.FromArgb(80, 50, 80), Color.FromArgb(105, 65, 105), PadX, BtnH, ref y);
+            y += RowGap / 2;
+
+            // 当前遮罩计数
+            _lblMaskInfo = new Label
+            {
+                Text = "当前遮罩：—", Left = PadX, Top = y,
+                Width = _pageCapture.ClientSize.Width - PadX * 2,
+                Height = fh + 4, ForeColor = Color.Gray, AutoSize = false,
+                Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top
+            };
+            _pageCapture.Controls.Add(_lblMaskInfo);
+            y += fh + 4 + RowGap;
 
             // 分隔线
             y += fh;
@@ -408,6 +424,7 @@ namespace VisionGuard
             // 捕获页按钮
             _btnSelectRegion.Click += BtnSelectRegion_Click;
             _btnPickWindow.Click   += BtnPickWindow_Click;
+            _btnEditMasks.Click    += BtnEditMasks_Click;
             _btnStart.Click        += BtnStart_Click;
             _btnStop.Click         += BtnStop_Click;
 

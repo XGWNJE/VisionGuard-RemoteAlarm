@@ -129,6 +129,10 @@ namespace VisionGuard.Services
                 }
                 long captureMs = sw.ElapsedMilliseconds;
 
+                // 1.5 应用遮罩区域（in-place，同时影响推理 / 报警截图 / UI 预览）
+                if (cfg.MaskRegions != null && cfg.MaskRegions.Count > 0)
+                    MaskApplier.ApplyMasks(frame, cfg.MaskRegions);
+
                 // 2. 预处理（内部 resize + 转张量）
                 sw.Restart();
                 float[] tensor = ImagePreprocessor.ToTensor(frame);

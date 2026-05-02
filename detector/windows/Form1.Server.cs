@@ -100,6 +100,10 @@ namespace VisionGuard
 
             UpdateRegionLabel();
 
+            // 遮罩区域（相对坐标 JSON 数组）
+            _maskRegions = ParseMasksJson(SettingsStore.GetString("MaskRegions", string.Empty));
+            UpdateMaskInfoLabel();
+
             // 服务器页：恢复设备名
             _txtDeviceName.Text = SettingsStore.GetString("DeviceName", Environment.MachineName);
 
@@ -139,6 +143,9 @@ namespace VisionGuard
                 if (_targetCheckBoxes[i].Checked)
                     watched.Add(_targetClassKeys[i]);
             SettingsStore.Set("WatchedClasses", string.Join(",", watched));
+
+            // 遮罩区域（相对坐标，JSON 数组）
+            SettingsStore.Set("MaskRegions", MasksToJson(_maskRegions));
 
             // 服务器设置：只保存设备名
             SettingsStore.Set("DeviceName", _txtDeviceName.Text.Trim());
@@ -352,6 +359,56 @@ namespace VisionGuard
                     _serverPushService.SendCommandAck($"set-config:{key}", false, $"未知配置项：{key}");
                     break;
             }
+        }
+
+        // ════════════════════════════════════════════════════════════
+        // 遮罩区域持久化辅助
+        // ════════════════════════════════════════════════════════════
+
+        /// <summary>遮罩 JSON DTO，使用 left/top/right/bottom 字段，与 Android 端格式对齐。</summary>
+        private class MaskRegionDto
+        {
+            public float left   { get; set; }
+            public float top    { get; set; }
+            public float right  { get; set; }
+            public float bottom { get; set; }
+        }
+
+        /// <summary>把 List&lt;RectangleF&gt; 序列化为 JSON 数组字符串。</summary>
+        private static string MasksToJson(List<RectangleF> masks)
+        {
+            if (masks == null || masks.Count == 0) return "[]";
+            var dtos = new List<MaskRegionDto>(masks.Count);
+            foreach (var r in masks)
+            {
+                dtos.Add(new MaskRegionDto
+                {
+                    left   = r.X,
+                    top    = r.Y,
+                    right  = r.X + r.Width,
+                    bottom = r.Y + r.Height,
+                });
+            }
+            return Utils.SimpleJson.ToJson(dtos);
+        }
+
+        /// <summary>把 JSON 数组字符串解析为 List&lt;RectangleF&gt;，失败返回空列表。</summary>
+        private static List<RectangleF> ParseMasksJson(string json)
+        {
+            if (string.IsNullOrWhiteSpace(json)) return new List<RectangleF>();
+            var dtos = Utils.SimpleJson.Deserialize<List<MaskRegionDto>>(json);
+            var list = new List<RectangleF>();
+            if (dtos == null) return list;
+            foreach (var d in dtos)
+            {
+                float x = Math.Max(0f, Math.Min(1f, d.left));
+                float y = Math.Max(0f, Math.Min(1f, d.top));
+                float w = Math.Max(0f, Math.Min(1f, d.right))  - x;
+                float h = Math.Max(0f, Math.Min(1f, d.bottom)) - y;
+                if (w <= 0f || h <= 0f) continue;
+                list.Add(new RectangleF(x, y, w, h));
+            }
+            return list;
         }
     }
 }

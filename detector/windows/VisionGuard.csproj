@@ -278,6 +278,7 @@
       <SubType>Form</SubType>
     </Compile>
     <Compile Include="Inference\ImagePreprocessor.cs" />
+    <Compile Include="Inference\MaskApplier.cs" />
     <Compile Include="Inference\OnnxInferenceEngine.cs" />
     <Compile Include="Inference\YoloOutputParser.cs" />
     <Compile Include="Models\AlertEvent.cs" />
@@ -314,6 +315,9 @@
       <SubType>Component</SubType>
     </Compile>
     <Compile Include="UI\RegionSelectorForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="UI\MaskEditorForm.cs">
       <SubType>Form</SubType>
     </Compile>
     <Compile Include="Utils\LogManager.cs" />
